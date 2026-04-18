@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Build
+dist/
+
+# Environment
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Prisma generated client
+prisma/generated/
+src/generated/
+
+# Coverage
+coverage/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+.vercel
+
+# Claude Code tooling
+.claude/
+
+# Build artifacts
+tsconfig.tsbuildinfo
+tsconfig.build.tsbuildinfo

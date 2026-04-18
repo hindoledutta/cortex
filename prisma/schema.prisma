@@ -1,0 +1,134 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum TaskStatus {
+  captured
+  active
+  in_progress
+  done
+  blocked
+  deferred
+}
+
+enum TaskPriority {
+  high
+  medium
+  low
+}
+
+enum WorkspaceName {
+  personal
+  work
+}
+
+enum CommentSource {
+  user
+  system
+  llm
+}
+
+model Workspace {
+  id               String        @id @default(uuid())
+  name             WorkspaceName @unique
+  isDefault        Boolean       @default(false)
+  googleCalendarId String?       @map("google_calendar_id")
+  createdAt        DateTime      @default(now()) @map("created_at")
+  updatedAt        DateTime      @updatedAt @map("updated_at")
+  tasks            Task[]
+  contacts         Contact[]
+
+  @@map("workspaces")
+}
+
+model Task {
+  id             String       @id @default(uuid())
+  workspaceId    String       @map("workspace_id")
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id])
+  parentId       String?      @map("parent_id")
+  parent         Task?        @relation("SubTasks", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children       Task[]       @relation("SubTasks")
+  comments       Comment[]
+  title          String
+  description    String?
+  sourceInput    String?      @map("source_input")
+  status         TaskStatus   @default(captured)
+  priority       TaskPriority @default(medium)
+  blockedReason  String?      @map("blocked_reason")
+  deferredUntil  DateTime?    @map("deferred_until")
+  deadline             DateTime?
+  reminderLeadMinutes  Int?         @map("reminder_lead_minutes")
+  estimatedEffort      Int?         @map("estimated_effort")
+  telegramMsgId        BigInt?      @map("telegram_msg_id")
+  calendarEvents       CalendarEvent[]
+  position       Int          @default(0)
+  createdAt      DateTime     @default(now()) @map("created_at")
+  updatedAt      DateTime     @updatedAt @map("updated_at")
+  completedAt    DateTime?    @map("completed_at")
+  deletedAt      DateTime?    @map("deleted_at")
+
+  @@index([workspaceId, deletedAt])
+  @@index([parentId])
+  @@index([telegramMsgId])
+  @@map("tasks")
+}
+
+model Comment {
+  id            String        @id @default(uuid())
+  taskId        String        @map("task_id")
+  task          Task          @relation(fields: [taskId], references: [id])
+  content       String
+  source        CommentSource @default(user)
+  telegramMsgId BigInt?       @map("telegram_msg_id")
+  createdAt     DateTime      @default(now()) @map("created_at")
+
+  @@index([taskId])
+  @@map("comments")
+}
+
+model Contact {
+  id          String     @id @default(uuid())
+  name        String
+  email       String
+  workspaceId String?    @map("workspace_id")
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id])
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  @@unique([name, workspaceId])
+  @@index([name])
+  @@map("contacts")
+}
+
+model CalendarEvent {
+  id             String   @id @default(uuid())
+  taskId         String?  @map("task_id")
+  task           Task?    @relation(fields: [taskId], references: [id])
+  googleEventId  String   @map("google_event_id")
+  calendarId     String   @map("calendar_id")
+  title          String
+  startsAt       DateTime @map("starts_at")
+  endsAt         DateTime @map("ends_at")
+  attendeeEmails String[] @map("attendee_emails")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  @@index([taskId])
+  @@index([googleEventId])
+  @@map("calendar_events")
+}
+
+model Settings {
+  id                  String   @id @default("default")
+  reminderLeadMinutes Int      @default(1440) @map("reminder_lead_minutes")
+  checkInAfterDays    Int      @default(3)    @map("check_in_after_days")
+  notificationHourUtc Int      @default(9)    @map("notification_hour_utc")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  @@map("settings")
+}

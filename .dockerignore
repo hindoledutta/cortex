@@ -1,0 +1,8 @@
+node_modules
+dist
+dashboard
+.planning
+.claude
+.git
+.env
+*.md

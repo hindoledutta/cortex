@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "./"
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.spec.ts",
+    "vitest.config.ts",
+    "prisma",
+    "dashboard",
+    "scripts",
+    "prisma.config.ts"
+  ]
+}
