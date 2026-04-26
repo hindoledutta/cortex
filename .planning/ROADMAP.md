@@ -2,7 +2,7 @@
 
 ## Overview
 
-Cortex delivers zero-friction task capture through a Telegram bot backed by LLM intelligence. The roadmap builds bottom-up: domain layer first (tasks, workspaces), then intelligence (LLM decomposition, sessions, voice), then the Telegram interface that wires it all together. Once the core capture loop is validated, proactive management (reminders, check-ins) and calendar integration add the timeline dimension. The web dashboard comes last, providing visual management once task volume warrants it.
+Cortex delivers zero-friction capture through a Telegram bot backed by LLM intelligence. The roadmap builds bottom-up: domain layer first (tasks, workspaces), then intelligence (LLM decomposition, sessions, voice), then the Telegram interface that wires it all together. Once the core capture loop is validated, proactive management (reminders, check-ins) and calendar integration add the timeline dimension. The web dashboard provides visual management once task volume warrants it. Phase 7 expands cortex beyond tasks: notes and meetings get captured into the user's `nirvana-wiki` knowledge vault for downstream curation and querying.
 
 ## Phases
 
@@ -18,6 +18,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Proactive Management** - Deadline reminders, stale task check-ins, and deferred task resurfacing
 - [ ] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
 - [ ] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
+- [ ] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
+- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), `/api/meetings/ingest` endpoint, Meetily integration, vault write to `raw/meetings/`, Telegram notification, `/vault recent`
 
 ## Phase Details
 
@@ -113,11 +115,47 @@ Plans:
 - [ ] 06-02-PLAN.md -- Dashboard scaffold (Vite + React + Tailwind + shadcn/ui + TanStack Router/Query + PWA + API client)
 - [ ] 06-03-PLAN.md -- Dashboard views (kanban board with dnd-kit, list view with TanStack Table, filters, view toggle)
 
+### Phase 7a: Note Capture
+**Goal**: User can invoke `/note` on Telegram (text or voice) and have the content land verbatim in `nirvana-wiki/raw/inbox/` as a committed and pushed markdown file, with a 60-second undo path -- without altering existing task-capture behavior
+**Depends on**: Phase 3 (Telegram interface), Phase 2 (LLM + Whisper) — and a GitHub remote for nirvana-wiki with a deploy key configured on Fly.io
+**Requirements**: NOTE-01, NOTE-02, NOTE-03, NOTE-04, NOTE-05, NOTE-06, NOTE-07, NOTE-08, NOTE-09, VAULT-01, VAULT-02, VAULT-03, VAULT-04, VAULT-05
+**Success Criteria** (what must be TRUE):
+  1. `/note <text>` from Telegram results in a verbatim markdown file at `raw/inbox/YYYY-MM-DD-{slug}.md` in the GitHub repo within 6 seconds
+  2. `/note` followed by a voice message produces a verbatim transcript at the same path within 10 seconds, reusing the existing Whisper pipeline
+  3. The bot reply includes the file path, commit sha, and a `[Undo]` inline button that, when tapped within 60 seconds, reverts the commit and soft-deletes the Note row
+  4. `/note` does not interrupt or alter an active task follow-up session — it routes that single message and returns
+  5. Cortex commits as `cortex-bot <bot@cortex.local>`; every write produces a `VaultWrite` audit row regardless of success
+  6. Cortex never writes outside `raw/inbox/`; conflicts with the wiki-ingest workflow do not occur in normal operation
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07a-01-PLAN.md -- Schema (Note, VaultWrite), VaultModule (clone bootstrap, pull-rebase-write-commit-push under mutex), env wiring for deploy key
+- [ ] 07a-02-PLAN.md -- `/note` Telegram command handler (text + voice + reply forms), Sonnet slug generation, OrchestratorService extension, [Undo] callback wiring, `/vault recent` command
+
+### Phase 7b: Meeting Capture
+**Goal**: A Google Meet call captured locally by Meetily on the Mac mini lands as a verbatim transcript at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds of the meeting ending, without any user action — and the user is notified on Telegram
+**Depends on**: Phase 7a (VaultModule), Meetily installed and configured on the Mac mini
+**Requirements**: MEET-01, MEET-02, MEET-03, MEET-04, MEET-05, MEET-06, MEET-07, MEET-08, MEET-09, VAULT-06
+**Success Criteria** (what must be TRUE):
+  1. After a Google Meet call ends, a transcript file appears at `raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds, with the correct date / start time / end time / attendees in the file header
+  2. The body is the verbatim Meetily transcript (with speaker labels and timestamps if Meetily provides them) — cortex does not summarize, paraphrase, or extract action items
+  3. Telegram receives a notification: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
+  4. Audio never leaves the Mac mini — only transcript text crosses the network
+  5. If `cortex-local` cannot reach the cortex API or push fails, it retries with exponential backoff up to 1 hour, then notifies the owner via Telegram
+  6. `/vault recent` on Telegram returns the last 10 vault writes (notes + meetings) with status
+  7. All Meeting rows default to the Work workspace (locked decision; no attendee-domain heuristic in v1)
+  8. `cortex-local` sends a daily heartbeat to cortex; cortex alerts via Telegram if no heartbeat received in 26 hours
+**Plans**: 2 plans
+
+Plans:
+- [ ] 07b-01-PLAN.md -- Schema (Meeting, Heartbeat), MeetingsController + `/api/meetings/ingest`, `/api/heartbeat` endpoint + heartbeat-staleness scheduled job, `/vault recent` command
+- [ ] 07b-02-PLAN.md -- `cortex-local` daemon (chokidar watcher, file-stable detection, POST + retry, ingest marker, daily heartbeat ping, launchd plist, install script)
+
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6
-Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if desired.
+Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7a -> 7b
+Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if desired. Phase 7a depends on Phase 3 only and can run in parallel with Phase 4-6 once Phase 3 is complete.
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
@@ -127,3 +165,5 @@ Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if 
 | 4. Proactive Management | 0/? | Not started | - |
 | 5. Calendar Integration | 0/? | Not started | - |
 | 6. Web Dashboard | 0/? | Not started | - |
+| 7a. Note Capture | 0/2 | Not started | - |
+| 7b. Meeting Capture | 0/2 | Not started | - |
