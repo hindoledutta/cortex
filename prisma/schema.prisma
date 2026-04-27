@@ -33,6 +33,16 @@ enum CommentSource {
   llm
 }
 
+enum NoteSource {
+  text
+  voice
+}
+
+enum VaultWriteKind {
+  note
+  meeting
+}
+
 model Workspace {
   id               String        @id @default(uuid())
   name             WorkspaceName @unique
@@ -42,35 +52,36 @@ model Workspace {
   updatedAt        DateTime      @updatedAt @map("updated_at")
   tasks            Task[]
   contacts         Contact[]
+  notes            Note[]
 
   @@map("workspaces")
 }
 
 model Task {
-  id             String       @id @default(uuid())
-  workspaceId    String       @map("workspace_id")
-  workspace      Workspace    @relation(fields: [workspaceId], references: [id])
-  parentId       String?      @map("parent_id")
-  parent         Task?        @relation("SubTasks", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
-  children       Task[]       @relation("SubTasks")
-  comments       Comment[]
-  title          String
-  description    String?
-  sourceInput    String?      @map("source_input")
-  status         TaskStatus   @default(captured)
-  priority       TaskPriority @default(medium)
-  blockedReason  String?      @map("blocked_reason")
-  deferredUntil  DateTime?    @map("deferred_until")
-  deadline             DateTime?
-  reminderLeadMinutes  Int?         @map("reminder_lead_minutes")
-  estimatedEffort      Int?         @map("estimated_effort")
-  telegramMsgId        BigInt?      @map("telegram_msg_id")
-  calendarEvents       CalendarEvent[]
-  position       Int          @default(0)
-  createdAt      DateTime     @default(now()) @map("created_at")
-  updatedAt      DateTime     @updatedAt @map("updated_at")
-  completedAt    DateTime?    @map("completed_at")
-  deletedAt      DateTime?    @map("deleted_at")
+  id                  String          @id @default(uuid())
+  workspaceId         String          @map("workspace_id")
+  workspace           Workspace       @relation(fields: [workspaceId], references: [id])
+  parentId            String?         @map("parent_id")
+  parent              Task?           @relation("SubTasks", fields: [parentId], references: [id], onDelete: NoAction, onUpdate: NoAction)
+  children            Task[]          @relation("SubTasks")
+  comments            Comment[]
+  title               String
+  description         String?
+  sourceInput         String?         @map("source_input")
+  status              TaskStatus      @default(captured)
+  priority            TaskPriority    @default(medium)
+  blockedReason       String?         @map("blocked_reason")
+  deferredUntil       DateTime?       @map("deferred_until")
+  deadline            DateTime?
+  reminderLeadMinutes Int?            @map("reminder_lead_minutes")
+  estimatedEffort     Int?            @map("estimated_effort")
+  telegramMsgId       BigInt?         @map("telegram_msg_id")
+  calendarEvents      CalendarEvent[]
+  position            Int             @default(0)
+  createdAt           DateTime        @default(now()) @map("created_at")
+  updatedAt           DateTime        @updatedAt @map("updated_at")
+  completedAt         DateTime?       @map("completed_at")
+  deletedAt           DateTime?       @map("deleted_at")
 
   @@index([workspaceId, deletedAt])
   @@index([parentId])
@@ -122,11 +133,44 @@ model CalendarEvent {
   @@map("calendar_events")
 }
 
+model Note {
+  id             String     @id @default(uuid())
+  workspaceId    String     @map("workspace_id")
+  workspace      Workspace  @relation(fields: [workspaceId], references: [id])
+  source         NoteSource
+  body           String
+  slug           String
+  vaultPath      String     @map("vault_path")
+  vaultCommitSha String?    @map("vault_commit_sha")
+  telegramMsgId  BigInt?    @map("telegram_msg_id")
+  createdAt      DateTime   @default(now()) @map("created_at")
+  deletedAt      DateTime?  @map("deleted_at")
+
+  @@index([workspaceId, deletedAt])
+  @@index([telegramMsgId])
+  @@map("notes")
+}
+
+model VaultWrite {
+  id        String         @id @default(uuid())
+  kind      VaultWriteKind
+  sourceId  String         @map("source_id")
+  vaultPath String         @map("vault_path")
+  commitSha String?        @map("commit_sha")
+  succeeded Boolean
+  error     String?
+  createdAt DateTime       @default(now()) @map("created_at")
+
+  @@index([kind, sourceId])
+  @@index([createdAt])
+  @@map("vault_writes")
+}
+
 model Settings {
   id                  String   @id @default("default")
   reminderLeadMinutes Int      @default(1440) @map("reminder_lead_minutes")
-  checkInAfterDays    Int      @default(3)    @map("check_in_after_days")
-  notificationHourUtc Int      @default(9)    @map("notification_hour_utc")
+  checkInAfterDays    Int      @default(3) @map("check_in_after_days")
+  notificationHourUtc Int      @default(9) @map("notification_hour_utc")
   createdAt           DateTime @default(now()) @map("created_at")
   updatedAt           DateTime @updatedAt @map("updated_at")
 
