@@ -10,6 +10,8 @@ import { CommentModule } from './comment/comment.module';
 import { CalendarModule } from './calendar/calendar.module';
 import { SettingsModule } from './settings/settings.module';
 import { SchedulerModule } from './scheduler/scheduler.module';
+import { VaultModule } from './vault/vault.module';
+import { NoteModule } from './note/note.module';
 
 @Module({
   imports: [
@@ -24,6 +26,8 @@ import { SchedulerModule } from './scheduler/scheduler.module';
     CalendarModule,
     SettingsModule,
     SchedulerModule,
+    VaultModule,
+    NoteModule,
   ],
 })
 export class AppModule {}
