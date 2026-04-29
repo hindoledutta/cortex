@@ -68,8 +68,8 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Knowledge Capture — Meetings (Phase 7b)
 
-- [ ] **MEET-01**: A `cortex-local` watcher daemon runs on the Mac mini under launchd, watching Meetily's output directory
-- [ ] **MEET-02**: When a new transcript file appears, the watcher waits for the file to be stable (5s) and POSTs it to cortex API
+- [x] **MEET-01**: A `cortex-local` watcher daemon runs on the Mac mini under launchd, watching Meetily's output directory
+- [x] **MEET-02**: When a new transcript file appears, the watcher waits for the file to be stable (5s) and POSTs it to cortex API
 - [x] **MEET-03**: Cortex authenticates the watcher via shared-secret Bearer token on `/api/meetings/ingest`
 - [x] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header
 - [x] **MEET-05**: Bot DMs owner: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`

@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-04-29T19:56:55.138Z"
+last_updated: "2026-04-29T20:07:59.736Z"
 progress:
   total_phases: 8
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 18
-  completed_plans: 16
+  completed_plans: 17
 ---
 
 # Project State
@@ -63,6 +63,7 @@ Progress: [##########] 100%
 | Phase 04 P02 | 4min | 2 tasks | 6 files |
 | Phase 07a-note-capture P02 | 10 | 3 tasks | 12 files |
 | Phase 07b-meeting-capture P01 | 10 | 4 tasks | 23 files |
+| Phase 07b-meeting-capture P02 | 8 | 2 tasks | 26 files |
 
 ## Accumulated Context
 
@@ -114,6 +115,9 @@ Recent decisions affecting current work:
 - [Phase 07b-meeting-capture]: SharedSecretGuard throws UnauthorizedException (not silent drop) — daemon must know its token is wrong, unlike ChatIdGuard which silently drops Telegram noise
 - [Phase 07b-meeting-capture]: HeartbeatService reads existing row via findUnique BEFORE upsert to detect lastError transitions for MEET-06 escalation chain
 - [Phase 07b-meeting-capture]: Migration written manually (not via prisma migrate diff) — Prisma 7 requires shadow DB for from-migrations diff; correct approach is hand-write only new DDL
+- [Phase 07b-meeting-capture]: Zod v4 nested .default({}) requires full default object — inner field defaults only apply when the outer key is present; fix is to provide the full default object at the outer .default() call
+- [Phase 07b-meeting-capture]: cortex-local is standalone subproject (not a workspace): own node_modules, own tsconfig — keeps daemon self-contained for install.sh deployment, avoids NestJS version conflicts
+- [Phase 07b-meeting-capture]: MEET-07 filter is hard .md extension check at top of processFile — audio never reaches any I/O, queue, or network call
 
 ### Pending Todos
 
