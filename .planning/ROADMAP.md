@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 4: Proactive Management** - Deadline reminders, stale task check-ins, and deferred task resurfacing
 - [ ] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
 - [ ] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
-- [ ] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
+- [x] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
 - [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), `/api/meetings/ingest` endpoint, Meetily integration, vault write to `raw/meetings/`, Telegram notification, `/vault recent`
 
 ## Phase Details
@@ -129,8 +129,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07a-01-PLAN.md -- Schema (Note, VaultWrite), VaultModule (clone bootstrap, pull-rebase-write-commit-push under mutex), env wiring for deploy key
-- [ ] 07a-02-PLAN.md -- `/note` Telegram command handler (text + voice + reply forms), Sonnet slug generation, OrchestratorService extension, [Undo] callback wiring, `/vault recent` command
+- [x] 07a-01-PLAN.md -- Schema (Note, VaultWrite), VaultModule (clone bootstrap, pull-rebase-write-commit-push under mutex), env wiring for deploy key
+- [x] 07a-02-PLAN.md -- `/note` Telegram command handler (text + voice + reply forms), Sonnet slug generation, OrchestratorService extension, [Undo] callback wiring, `/vault recent` command
 
 ### Phase 7b: Meeting Capture
 **Goal**: A Google Meet call captured locally by Meetily on the Mac mini lands as a verbatim transcript at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds of the meeting ending, without any user action — and the user is notified on Telegram
@@ -165,5 +165,5 @@ Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if 
 | 4. Proactive Management | 0/? | Not started | - |
 | 5. Calendar Integration | 0/? | Not started | - |
 | 6. Web Dashboard | 0/? | Not started | - |
-| 7a. Note Capture | 0/2 | Not started | - |
+| 7a. Note Capture | 2/2 | Complete | 2026-04-30 |
 | 7b. Meeting Capture | 0/2 | Not started | - |
