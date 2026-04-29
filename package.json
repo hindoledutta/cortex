@@ -45,6 +45,7 @@
     "@nestjs/cli": "^11",
     "@nestjs/testing": "^11",
     "@swc/core": "^1",
+    "@types/express": "^5.0.6",
     "@types/node": "^22",
     "@types/pg": "^8",
     "@types/slug": "^5.0.9",

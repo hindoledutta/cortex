@@ -146,6 +146,102 @@ export class NotificationService {
   }
 
   /**
+   * Notify owner that a meeting has been captured to the vault.
+   * Format per HLD §3.8 B-MEET-5 + RESEARCH.md MEET-05:
+   *   `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
+   * No interactive buttons — informational.
+   */
+  async sendMeetingCaptured(input: {
+    title: string;
+    startedAt: Date;
+    endedAt: Date;
+    attendeeCount: number;
+    vaultPath: string;
+  }): Promise<void> {
+    const duration = NotificationService.formatDuration(input.startedAt, input.endedAt);
+    const attendeesLabel =
+      input.attendeeCount === 1 ? '1 attendee' : `${input.attendeeCount} attendees`;
+    const text = [
+      `<b>📝 Meeting captured</b>`,
+      ``,
+      `"${this.escapeHtml(input.title)}" (${duration}, ${attendeesLabel})`,
+      `→ <code>${this.escapeHtml(input.vaultPath)}</code>`,
+    ].join('\n');
+    await this.bot.telegram.sendMessage(this.ownerChatId, text, { parse_mode: 'HTML' });
+    this.logger.log(`Meeting captured notification sent: ${input.vaultPath}`);
+  }
+
+  /**
+   * Notify owner that a cortex-local heartbeat is overdue.
+   * Per HLD §3.8 B-MEET-7: includes hours-since-last-seen + (if available) the daemon's last reported error.
+   */
+  async sendHeartbeatStale(input: {
+    host: string;
+    hoursAgo: number;
+    lastError?: string | null;
+  }): Promise<void> {
+    const lines = [
+      `<b>⚠️ cortex-local silent</b>`,
+      ``,
+      `<code>${this.escapeHtml(input.host)}</code> hasn't checked in for <b>${input.hoursAgo}</b> hours.`,
+      `Meetily may not be capturing meetings.`,
+    ];
+    if (input.lastError) {
+      lines.push(``);
+      lines.push(`Last reported error: <code>${this.escapeHtml(input.lastError.slice(0, 200))}</code>`);
+    }
+    await this.bot.telegram.sendMessage(this.ownerChatId, lines.join('\n'), { parse_mode: 'HTML' });
+    this.logger.log(`Heartbeat-stale notification sent: host=${input.host} hoursAgo=${input.hoursAgo}`);
+  }
+
+  /**
+   * MEET-06 server-side escalation channel. Fired by HeartbeatService.upsert when the daemon
+   * reports a fresh `last_error` (transition from null/different value → new non-null value).
+   * The daemon itself has NO Telegram bot token; it surfaces failures through this field.
+   *
+   * Format (HTML, parse_mode: HTML):
+   *   ⚠ <b>cortex-local upload failed</b>
+   *
+   *   Host: <code>{host}</code>
+   *   Last error: <code>{escapeHtml(error)}</code>
+   *
+   *   Meeting capture is paused. Investigate the daemon log on the Mac mini.
+   */
+  async sendUploadFailed(input: {
+    host: string;
+    error: string;
+  }): Promise<void> {
+    const text = [
+      `⚠ <b>cortex-local upload failed</b>`,
+      ``,
+      `Host: <code>${this.escapeHtml(input.host)}</code>`,
+      `Last error: <code>${this.escapeHtml(input.error.slice(0, 500))}</code>`,
+      ``,
+      `Meeting capture is paused. Investigate the daemon log on the Mac mini.`,
+    ].join('\n');
+    await this.bot.telegram.sendMessage(this.ownerChatId, text, { parse_mode: 'HTML' });
+    this.logger.log(
+      `Upload-failed notification sent: host=${input.host} error="${input.error.slice(0, 80)}"`,
+    );
+  }
+
+  /**
+   * Format a duration between two dates.
+   * "47 min" if < 60 minutes, "1h 12m" if >= 60 minutes.
+   * Public static for unit testing.
+   */
+  static formatDuration(startedAt: Date, endedAt: Date): string {
+    const totalMinutes = Math.max(
+      0,
+      Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000),
+    );
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours}h ${minutes}m`;
+  }
+
+  /**
    * Escape HTML special characters for Telegram HTML parse mode.
    */
   private escapeHtml(text: string): string {
