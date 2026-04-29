@@ -22,7 +22,7 @@ export class SchedulerService implements OnModuleInit, OnModuleDestroy {
     this.boss = new PgBoss({
       connectionString: this.config.getOrThrow<string>('DATABASE_URL'),
       max: 2,
-      pollingIntervalSeconds: 600,
+      monitorIntervalSeconds: 600,
     });
   }
 
