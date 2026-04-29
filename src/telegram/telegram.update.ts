@@ -45,6 +45,16 @@ export class TelegramUpdate {
     await this.orchestrator.handleCommand(ctx, 'settings');
   }
 
+  @Command('note')
+  async onNote(@Ctx() ctx: Context) {
+    await this.orchestrator.handleNoteCommand(ctx);
+  }
+
+  @Command('vault')
+  async onVault(@Ctx() ctx: Context) {
+    await this.orchestrator.handleVaultRecentCommand(ctx);
+  }
+
   @On('text')
   async onText(@Ctx() ctx: Context) {
     await this.orchestrator.handleText(ctx);
@@ -78,5 +88,10 @@ export class TelegramUpdate {
   @Action(/^cal:(confirm|cancel):(.+)$/)
   async onCalendarConfirmAction(@Ctx() ctx: Context) {
     await this.orchestrator.handleCalendarConfirmCallback(ctx);
+  }
+
+  @Action(/^note:undo:(.+)$/)
+  async onNoteUndo(@Ctx() ctx: Context) {
+    await this.orchestrator.handleNoteUndoCallback(ctx);
   }
 }

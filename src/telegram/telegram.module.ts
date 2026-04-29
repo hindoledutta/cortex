@@ -8,6 +8,8 @@ import { TaskModule } from '../task/task.module';
 import { WorkspaceModule } from '../workspace/workspace.module';
 import { CommentModule } from '../comment/comment.module';
 import { CalendarModule } from '../calendar/calendar.module';
+import { VaultModule } from '../vault/vault.module';
+import { NoteModule } from '../note/note.module';
 import { ChatIdGuard } from './guards/chat-id.guard';
 import { VoiceService } from './services/voice.service';
 import { MessageFormatterService } from './services/message-formatter.service';
@@ -47,6 +49,8 @@ import { TelegramUpdate } from './telegram.update';
     WorkspaceModule,
     CommentModule,
     CalendarModule,
+    VaultModule,
+    NoteModule,
   ],
   providers: [
     ChatIdGuard,
