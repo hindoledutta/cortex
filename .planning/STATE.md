@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-04-29T19:32:33.802Z"
+last_updated: "2026-04-29T19:56:55.138Z"
 progress:
   total_phases: 8
   completed_phases: 6
   total_plans: 18
-  completed_plans: 15
+  completed_plans: 16
 ---
 
 # Project State
@@ -62,6 +62,7 @@ Progress: [##########] 100%
 | Phase 05 P02 | 4min | 2 tasks | 10 files |
 | Phase 04 P02 | 4min | 2 tasks | 6 files |
 | Phase 07a-note-capture P02 | 10 | 3 tasks | 12 files |
+| Phase 07b-meeting-capture P01 | 10 | 4 tasks | 23 files |
 
 ## Accumulated Context
 
@@ -110,6 +111,9 @@ Recent decisions affecting current work:
 - [Phase 07a-note-capture]: SlugService NEVER throws — fallback to HHMM-note on any LLM failure, note capture must not fail over a slug
 - [Phase 07a-note-capture]: 10-min voice cap in handleVoice short-circuit BEFORE getFileLink per RESEARCH.md Pitfall 6
 - [Phase 07a-note-capture]: pollingIntervalSeconds not valid in pg-boss v12 ConstructorOptions — replaced with monitorIntervalSeconds
+- [Phase 07b-meeting-capture]: SharedSecretGuard throws UnauthorizedException (not silent drop) — daemon must know its token is wrong, unlike ChatIdGuard which silently drops Telegram noise
+- [Phase 07b-meeting-capture]: HeartbeatService reads existing row via findUnique BEFORE upsert to detect lastError transitions for MEET-06 escalation chain
+- [Phase 07b-meeting-capture]: Migration written manually (not via prisma migrate diff) — Prisma 7 requires shadow DB for from-migrations diff; correct approach is hand-write only new DDL
 
 ### Pending Todos
 

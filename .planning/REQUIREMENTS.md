@@ -70,13 +70,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 - [ ] **MEET-01**: A `cortex-local` watcher daemon runs on the Mac mini under launchd, watching Meetily's output directory
 - [ ] **MEET-02**: When a new transcript file appears, the watcher waits for the file to be stable (5s) and POSTs it to cortex API
-- [ ] **MEET-03**: Cortex authenticates the watcher via shared-secret Bearer token on `/api/meetings/ingest`
-- [ ] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header
-- [ ] **MEET-05**: Bot DMs owner: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
-- [ ] **MEET-06**: On ingest failure, watcher retries with exponential backoff up to 1 hour, then notifies owner via Telegram
-- [ ] **MEET-07**: Audio never leaves the Mac (Meetily transcribes locally; cortex receives only text)
-- [ ] **MEET-08**: All Meeting rows are created in the Work workspace by default (no attendee-domain heuristic in v1)
-- [ ] **MEET-09**: `cortex-local` sends a daily heartbeat (`POST /api/heartbeat`) and cortex DMs the owner if the last heartbeat is older than 26 hours
+- [x] **MEET-03**: Cortex authenticates the watcher via shared-secret Bearer token on `/api/meetings/ingest`
+- [x] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header
+- [x] **MEET-05**: Bot DMs owner: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
+- [x] **MEET-06**: On ingest failure, watcher retries with exponential backoff up to 1 hour, then notifies owner via Telegram
+- [x] **MEET-07**: Audio never leaves the Mac (Meetily transcribes locally; cortex receives only text)
+- [x] **MEET-08**: All Meeting rows are created in the Work workspace by default (no attendee-domain heuristic in v1)
+- [x] **MEET-09**: `cortex-local` sends a daily heartbeat (`POST /api/heartbeat`) and cortex DMs the owner if the last heartbeat is older than 26 hours
 
 ### Knowledge Capture — Vault (Phase 7 shared)
 
@@ -85,7 +85,7 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **VAULT-03**: Cortex writes only to `raw/inbox/` and `raw/meetings/` — never to `wiki/` or other paths
 - [ ] **VAULT-04**: Cortex commits as `cortex-bot <bot@cortex.local>` for log auditability
 - [ ] **VAULT-05**: Every write is recorded in a `VaultWrite` audit log (kind, source_id, vault_path, commit_sha, succeeded, error)
-- [ ] **VAULT-06**: User can run `/vault recent` on Telegram to list the last 10 vault writes with status
+- [x] **VAULT-06**: User can run `/vault recent` on Telegram to list the last 10 vault writes with status
 
 ## v2 Requirements
 
