@@ -8,6 +8,7 @@ import { EnrichmentService } from './enrichment.service';
 import { CommentProcessingService } from './comment-processing.service';
 import { CalendarExtractionService } from './calendar-extraction.service';
 import { DirectCalendarExtractionService } from './direct-calendar-extraction.service';
+import { SlugService } from './slug.service';
 
 @Module({
   imports: [forwardRef(() => TaskModule)],
@@ -20,6 +21,7 @@ import { DirectCalendarExtractionService } from './direct-calendar-extraction.se
     CommentProcessingService,
     CalendarExtractionService,
     DirectCalendarExtractionService,
+    SlugService,
   ],
   exports: [
     LlmService,
@@ -30,6 +32,7 @@ import { DirectCalendarExtractionService } from './direct-calendar-extraction.se
     CommentProcessingService,
     CalendarExtractionService,
     DirectCalendarExtractionService,
+    SlugService,
   ],
 })
 export class LlmModule {}

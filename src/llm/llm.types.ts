@@ -11,7 +11,8 @@ export type LlmOperation =
   | 'enrichment'
   | 'comment-extraction'
   | 'calendar-extraction'
-  | 'direct-calendar-extraction';
+  | 'direct-calendar-extraction'
+  | 'slug-generation';
 
 /**
  * Model routing map: Opus 4.6 for decomposition, Sonnet 4.6 for everything else.
@@ -25,6 +26,7 @@ export const MODEL_MAP: Record<LlmOperation, string> = {
   'comment-extraction': 'claude-sonnet-4-6',
   'calendar-extraction': 'claude-sonnet-4-6',
   'direct-calendar-extraction': 'claude-sonnet-4-6',
+  'slug-generation': 'claude-sonnet-4-6',
 };
 
 /**
@@ -126,3 +128,8 @@ export const CommentExtractionResultSchema = z.object({
 export type CommentExtractionResult = z.infer<
   typeof CommentExtractionResultSchema
 >;
+
+export const SlugResultSchema = z.object({
+  slug: z.string().regex(/^[a-z0-9]+(-[a-z0-9]+){2,5}$/), // 3-6 hyphenated tokens
+});
+export type SlugResult = z.infer<typeof SlugResultSchema>;
