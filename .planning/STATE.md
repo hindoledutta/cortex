@@ -3,12 +3,12 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: unknown
-last_updated: "2026-02-28T02:48:48.603Z"
+last_updated: "2026-04-29T19:32:33.802Z"
 progress:
-  total_phases: 6
+  total_phases: 8
   completed_phases: 6
-  total_plans: 14
-  completed_plans: 14
+  total_plans: 18
+  completed_plans: 15
 ---
 
 # Project State
@@ -61,6 +61,7 @@ Progress: [##########] 100%
 | Phase 04 P01 | 7min | 2 tasks | 8 files |
 | Phase 05 P02 | 4min | 2 tasks | 10 files |
 | Phase 04 P02 | 4min | 2 tasks | 6 files |
+| Phase 07a-note-capture P02 | 10 | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -106,6 +107,9 @@ Recent decisions affecting current work:
 - [Phase 04]: cancelReminder is no-op log -- pg-boss v12 cancel() needs job ID, handler guard re-validates state
 - [Phase 04]: TaskService @Optional() forwardRef for ReminderService preserves test backward compatibility
 - [Phase 04]: Notification-first pattern for deferred resurfacing -- send message before status mutation
+- [Phase 07a-note-capture]: SlugService NEVER throws — fallback to HHMM-note on any LLM failure, note capture must not fail over a slug
+- [Phase 07a-note-capture]: 10-min voice cap in handleVoice short-circuit BEFORE getFileLink per RESEARCH.md Pitfall 6
+- [Phase 07a-note-capture]: pollingIntervalSeconds not valid in pg-boss v12 ConstructorOptions — replaced with monitorIntervalSeconds
 
 ### Pending Todos
 

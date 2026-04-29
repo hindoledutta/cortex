@@ -1,7 +1,8 @@
 # Requirements: Cortex
 
 **Defined:** 2026-02-27
-**Core Value:** Zero-friction capture -- user speaks or types a brain dump into Telegram, system turns it into organized, trackable tasks with structure, timelines, and calendar commitments.
+**Last expanded:** 2026-04-26 (Phase 7 — Knowledge Capture)
+**Core Value:** Zero-friction capture -- user speaks or types a brain dump into Telegram, system turns it into either organized, trackable tasks (with structure, timelines, and calendar commitments) or knowledge (notes, meeting transcripts) delivered into the user's `nirvana-wiki` for downstream curation and querying.
 
 ## v1 Requirements
 
@@ -53,6 +54,39 @@ Requirements for initial release. Each maps to roadmap phases.
 - [ ] **DASH-01**: User can access web dashboard PWA to view and manage tasks
 - [x] **DASH-02**: Dashboard provides kanban view, list view, and filters by workspace/status/deadline
 
+### Knowledge Capture — Notes (Phase 7a)
+
+- [x] **NOTE-01**: User can invoke `/note <text>` on Telegram to capture a text note routed to nirvana-wiki (not as a task)
+- [x] **NOTE-02**: User can invoke `/note` followed by a voice message to capture a voice note (transcribed via existing Whisper pipeline)
+- [x] **NOTE-03**: User can reply to a transcribed voice message with `/note` to re-route it from "task" to "note"
+- [x] **NOTE-04**: System writes notes verbatim (no LLM rewriting) to `nirvana-wiki/raw/inbox/YYYY-MM-DD-{slug}.md` with a Source / Captured / Workspace header
+- [x] **NOTE-05**: System generates a 4-6 word kebab-case slug for the filename via Sonnet (no body changes)
+- [x] **NOTE-06**: Bot replies with the file path and commit sha, plus an `[Undo]` inline button valid for 60 seconds
+- [x] **NOTE-07**: `[Undo]` reverts the git commit, pushes, and soft-deletes the Note record
+- [x] **NOTE-08**: Voice notes longer than 10 minutes are rejected with a clear error (Whisper cost guard)
+- [x] **NOTE-09**: `/note` is a side-channel — does not interrupt or alter an active task follow-up session
+
+### Knowledge Capture — Meetings (Phase 7b)
+
+- [ ] **MEET-01**: A `cortex-local` watcher daemon runs on the Mac mini under launchd, watching Meetily's output directory
+- [ ] **MEET-02**: When a new transcript file appears, the watcher waits for the file to be stable (5s) and POSTs it to cortex API
+- [ ] **MEET-03**: Cortex authenticates the watcher via shared-secret Bearer token on `/api/meetings/ingest`
+- [ ] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header
+- [ ] **MEET-05**: Bot DMs owner: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
+- [ ] **MEET-06**: On ingest failure, watcher retries with exponential backoff up to 1 hour, then notifies owner via Telegram
+- [ ] **MEET-07**: Audio never leaves the Mac (Meetily transcribes locally; cortex receives only text)
+- [ ] **MEET-08**: All Meeting rows are created in the Work workspace by default (no attendee-domain heuristic in v1)
+- [ ] **MEET-09**: `cortex-local` sends a daily heartbeat (`POST /api/heartbeat`) and cortex DMs the owner if the last heartbeat is older than 26 hours
+
+### Knowledge Capture — Vault (Phase 7 shared)
+
+- [ ] **VAULT-01**: Cortex maintains a working clone of nirvana-wiki on a Fly.io persistent volume
+- [ ] **VAULT-02**: Every write follows pull-rebase → write → commit → push under a single-writer mutex
+- [ ] **VAULT-03**: Cortex writes only to `raw/inbox/` and `raw/meetings/` — never to `wiki/` or other paths
+- [ ] **VAULT-04**: Cortex commits as `cortex-bot <bot@cortex.local>` for log auditability
+- [ ] **VAULT-05**: Every write is recorded in a `VaultWrite` audit log (kind, source_id, vault_path, commit_sha, succeeded, error)
+- [ ] **VAULT-06**: User can run `/vault recent` on Telegram to list the last 10 vault writes with status
+
 ## v2 Requirements
 
 Deferred to future release. Tracked but not in current roadmap.
@@ -80,6 +114,12 @@ Explicitly excluded. Documented to prevent scope creep.
 | Natural language search | Simple ILIKE keyword search covers 90% of needs for <1000 tasks |
 | Habit tracking | Different domain, different data model; use a dedicated app |
 | AI auto-scheduling | Suggest time blocks but let user decide; auto-scheduling is a whole product |
+| Cortex writing to `nirvana-wiki/wiki/` (curated) | Owned by the existing Claude-ingest workflow; two writers would drift |
+| Real-time / live meeting transcription | Post-meeting only; live coaching is a different product |
+| Audio file persistence (DB or vault) | Transcripts only; audio is a privacy + storage liability |
+| Multi-source meeting ingestion in v1 | Meetily-only; the same `/api/meetings/ingest` accepts other sources later |
+| Cortex-side meeting summaries / action item extraction | The wiki-ingest workflow already does source-summary extraction when promoting `raw/` → `wiki/` |
+| New query/search surface (Telegram `/search`, web search UI) | Obsidian + Claude Code in the vault + curated `wiki/` views already cover queryability |
 
 ## Traceability
 
@@ -112,12 +152,16 @@ Which phases cover which requirements. Updated during roadmap creation.
 | CAL-03 | Phase 5 | Complete |
 | DASH-01 | Phase 6 | Pending |
 | DASH-02 | Phase 6 | Complete |
+| NOTE-01..09 | Phase 7a | Pending |
+| MEET-01..09 | Phase 7b | Pending |
+| VAULT-01..06 | Phase 7 (shared across 7a + 7b) | Pending |
 
 **Coverage:**
-- v1 requirements: 25 total
-- Mapped to phases: 25
+- v1 requirements: 25 total (mapped to phases 1-6)
+- v1.1 requirements: 24 new (NOTE: 9, MEET: 9, VAULT: 6) mapped to Phase 7
+- Total mapped: 49
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-02-27*
-*Last updated: 2026-02-27 after roadmap creation*
+*Last updated: 2026-04-26 after Phase 7 (Knowledge Capture) added*
