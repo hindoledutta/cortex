@@ -55,6 +55,12 @@ export const CALENDAR_ACTIONS = {
 export const MAX_MESSAGE_LENGTH = 4000;
 
 /**
+ * Callback prefix for note undo inline keyboard buttons.
+ * Full callback key shape: note:undo:{noteId}
+ */
+export const NOTE_CALLBACK_PREFIX = 'note:undo';
+
+/**
  * Format callback data string for inline keyboard buttons.
  * Pattern: prefix:action:entityId
  */

@@ -379,6 +379,55 @@ export class MessageFormatterService {
   }
 
   /**
+   * Format the "Note saved" reply with vault path, commit sha, and [Undo] inline button.
+   */
+  formatNoteSaved(input: {
+    noteId: string;
+    vaultPath: string;
+    commitSha: string;
+  }): { text: string; extra: Record<string, unknown> } {
+    const shortSha = input.commitSha.slice(0, 7);
+    const text =
+      `📝 <b>Note saved</b>\n` +
+      `<code>${this.escapeHtml(input.vaultPath)}</code>\n` +
+      `commit <code>${this.escapeHtml(shortSha)}</code>`;
+    const extra = {
+      parse_mode: 'HTML' as const,
+      ...Markup.inlineKeyboard([
+        Markup.button.callback('↩️ Undo', `note:undo:${input.noteId}`),
+      ]),
+    };
+    return { text, extra };
+  }
+
+  /**
+   * Format the "Note reverted" reply after a successful undo.
+   */
+  formatNoteReverted(): string {
+    return '↩️ <b>Reverted.</b>';
+  }
+
+  /**
+   * Format the /vault recent list — the last N vault writes with status indicators.
+   */
+  formatVaultRecent(
+    rows: Array<{
+      createdAt: Date;
+      kind: string;
+      vaultPath: string;
+      succeeded: boolean;
+    }>,
+  ): string {
+    if (rows.length === 0) return '<i>No vault writes yet.</i>';
+    const lines = rows.map((r) => {
+      const status = r.succeeded ? '✅' : '❌';
+      const when = r.createdAt.toISOString().slice(0, 16).replace('T', ' ');
+      return `${status} <code>${when}</code> ${this.escapeHtml(r.vaultPath)}`;
+    });
+    return `📜 <b>Recent vault writes</b>\n\n${lines.join('\n')}`;
+  }
+
+  /**
    * Escape HTML special characters for Telegram HTML parse mode.
    */
   private escapeHtml(text: string): string {

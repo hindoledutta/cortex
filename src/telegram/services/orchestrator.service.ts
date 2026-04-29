@@ -2,6 +2,9 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Context } from 'telegraf';
 import { randomUUID } from 'crypto';
+import { VaultService } from '../../vault/vault.service';
+import { NoteService } from '../../note/note.service';
+import { SlugService } from '../../llm/slug.service';
 import { ClassificationService } from '../../llm/classification.service';
 import { DecompositionService } from '../../llm/decomposition.service';
 import { FollowUpService } from '../../llm/follow-up.service';
@@ -143,6 +146,16 @@ export class OrchestratorService {
   /** In-memory store for pending direct calendar bookings awaiting workspace selection. */
   private pendingDirectBookings = new Map<string, { text: string; extraction: DirectCalendarExtractionResult }>();
 
+  /** In-memory store for pending note voice sessions, keyed by chatId. */
+  private pendingNoteVoiceSessions = new Map<
+    string, // chatId
+    { workspaceId: string; expiresAt: Date }
+  >();
+
+  private static readonly NOTE_VOICE_TTL_MS = 5 * 60 * 1000; // 5 min
+  private static readonly NOTE_VOICE_MAX_DURATION_S = 600; // 10 min hard cap (NOTE-08)
+  private static readonly UNDO_WINDOW_MS = 60 * 1000; // 60 sec (NOTE-06, NOTE-07)
+
   constructor(
     private readonly classification: ClassificationService,
     private readonly decomposition: DecompositionService,
@@ -162,6 +175,9 @@ export class OrchestratorService {
     private readonly formatter: MessageFormatterService,
     private readonly prisma: PrismaService,
     private readonly config: ConfigService,
+    private readonly vault: VaultService,
+    private readonly noteService: NoteService,
+    private readonly slugService: SlugService,
   ) {}
 
   /**
@@ -202,16 +218,33 @@ export class OrchestratorService {
 
   /**
    * Handle incoming voice messages.
-   * Transcribes via Whisper, shows transcription, then classifies and routes.
+   * Short-circuits to note-voice flow if a pending note session exists for this chat.
+   * Otherwise transcribes via Whisper, shows transcription, then classifies and routes.
    */
   async handleVoice(ctx: Context): Promise<void> {
+    const chatId = String(ctx.chat!.id);
+    const message = ctx.message as Record<string, any>;
+    const voice = message.voice;
+
+    // NOTE-08: 10-min cap enforced BEFORE Whisper to avoid burning $$ on rejected audio.
+    // Short-circuit to note voice handler if a pending note session exists.
+    const noteSession = this.pendingNoteVoiceSessions.get(chatId);
+    if (noteSession && noteSession.expiresAt > new Date()) {
+      this.pendingNoteVoiceSessions.delete(chatId);
+      if (voice?.duration && voice.duration > OrchestratorService.NOTE_VOICE_MAX_DURATION_S) {
+        await ctx.reply(
+          '⏱️ Voice notes are capped at 10 minutes. Please send a shorter clip.',
+        );
+        return;
+      }
+      return this.handleNoteVoice(ctx, chatId, noteSession.workspaceId);
+    }
+
     let transcription: string | null = null;
 
     try {
       await ctx.sendChatAction('typing');
 
-      const message = ctx.message as Record<string, any>;
-      const voice = message.voice;
       const fileLink = await ctx.telegram.getFileLink(voice.file_id);
 
       transcription = await this.voice.transcribe(fileLink);
@@ -235,6 +268,249 @@ export class OrchestratorService {
       this.logger.error(`Error processing voice transcription: ${error}`);
       await ctx.reply(this.formatProcessingError(error));
     }
+  }
+
+  /**
+   * Handle the /note command in its three forms:
+   * 1. /note <text>  — inline text note
+   * 2. /note (bare)  — arms a pending voice session
+   * 3. /note (reply to transcription) — saves the replied-to transcript as a note
+   *
+   * NOTE-09 compliance: does NOT call classifyAndRoute, session.refreshTtl, or
+   * modify any pending follow-up state — the note side-channel is fully isolated.
+   */
+  async handleNoteCommand(ctx: Context): Promise<void> {
+    try {
+      const chatId = String(ctx.chat!.id);
+      const message = ctx.message as Record<string, any>;
+      const rawText: string = (message.text ?? '').replace(/^\/note(@\w+)?\s*/, '');
+
+      // Form 3: reply to a previously transcribed voice message
+      const replyTo = message.reply_to_message;
+      if (replyTo?.from?.is_bot && typeof replyTo.text === 'string') {
+        const transcript = this.extractTranscriptFromTranscriptionMessage(replyTo.text);
+        if (transcript) {
+          const { workspace, body } = this.parseWorkspacePrefix(transcript);
+          const wsId = workspace
+            ? (await this.workspace.findByName(workspace as any))?.id
+            : (await this.workspace.getDefault()).id;
+          if (!wsId) {
+            await ctx.reply('Could not resolve workspace for note.');
+            return;
+          }
+          await this.persistNote(ctx, { workspaceId: wsId, source: 'voice', body });
+          return;
+        }
+      }
+
+      // Form 1: /note <text>
+      if (rawText.length > 0) {
+        const { workspace, body } = this.parseWorkspacePrefix(rawText);
+        const wsId = workspace
+          ? (await this.workspace.findByName(workspace as any))?.id
+          : (await this.workspace.getDefault()).id;
+        if (!wsId) {
+          await ctx.reply('Could not resolve workspace for note.');
+          return;
+        }
+        await this.persistNote(ctx, { workspaceId: wsId, source: 'text', body });
+        return;
+      }
+
+      // Form 2: bare /note → arm pending voice session
+      const ws = await this.workspace.getDefault();
+      this.pendingNoteVoiceSessions.set(chatId, {
+        workspaceId: ws.id,
+        expiresAt: new Date(Date.now() + OrchestratorService.NOTE_VOICE_TTL_MS),
+      });
+      await ctx.reply('🎤 Send your voice message — I\'ll save it as a note. (5-min window)');
+    } catch (error) {
+      this.logger.error(`Error handling /note: ${error}`);
+      await ctx.reply(this.formatProcessingError(error));
+    }
+  }
+
+  /**
+   * Handle /vault command — shows the last 10 vault writes.
+   */
+  async handleVaultRecentCommand(ctx: Context): Promise<void> {
+    try {
+      const rows = await this.prisma.vaultWrite.findMany({
+        orderBy: { createdAt: 'desc' },
+        take: 10,
+      });
+      const text = this.formatter.formatVaultRecent(rows);
+      await ctx.reply(text, { parse_mode: 'HTML' });
+    } catch (error) {
+      this.logger.error(`Error fetching vault recent: ${error}`);
+      await ctx.reply(this.formatProcessingError(error));
+    }
+  }
+
+  /**
+   * Handle note:undo:{noteId} callback — reverts the vault commit and soft-deletes the Note row.
+   */
+  async handleNoteUndoCallback(ctx: Context): Promise<void> {
+    try {
+      const data = (ctx.callbackQuery as any)?.data as string | undefined;
+      const match = data?.match(/^note:undo:(.+)$/);
+      if (!match) {
+        await ctx.answerCbQuery('Bad callback');
+        return;
+      }
+      const noteId = match[1];
+      const note = await this.noteService.findById(noteId);
+      if (!note) {
+        await ctx.answerCbQuery('Note not found');
+        return;
+      }
+      if (note.deletedAt) {
+        await ctx.answerCbQuery('Already undone');
+        return;
+      }
+      const ageMs = Date.now() - note.createdAt.getTime();
+      if (ageMs > OrchestratorService.UNDO_WINDOW_MS) {
+        await ctx.answerCbQuery('Undo window expired');
+        return;
+      }
+      if (!note.vaultCommitSha) {
+        await ctx.answerCbQuery('No commit to revert');
+        return;
+      }
+
+      await this.vault.revertLastCommit(note.vaultCommitSha);
+      await this.noteService.softDelete(noteId);
+
+      await ctx.answerCbQuery('Reverted');
+      await ctx.editMessageReplyMarkup({ inline_keyboard: [] }); // remove the [Undo] button
+      await ctx.reply(this.formatter.formatNoteReverted(), { parse_mode: 'HTML' });
+    } catch (error) {
+      this.logger.error(`Error handling note undo: ${error}`);
+      await ctx.answerCbQuery('Undo failed — vault may have moved on');
+    }
+  }
+
+  /**
+   * Handle note voice — invoked from handleVoice when a pending note session matched.
+   * Transcribes via Whisper then calls persistNote with the transcript.
+   */
+  private async handleNoteVoice(ctx: Context, chatId: string, workspaceId: string): Promise<void> {
+    try {
+      await ctx.sendChatAction('typing');
+      const message = ctx.message as Record<string, any>;
+      const fileLink = await ctx.telegram.getFileLink(message.voice.file_id);
+      const transcript = await this.voice.transcribe(fileLink);
+      await this.persistNote(ctx, { workspaceId, source: 'voice', body: transcript });
+    } catch (error) {
+      this.logger.error(`Error handling note voice: ${error}`);
+      await ctx.reply('Sorry, I couldn\'t process that voice note. Please try again.');
+    }
+  }
+
+  /**
+   * Shared core for all note persistence: slug → vault write → DB row → Telegram reply with [Undo].
+   * Never throws externally — errors are caught and surfaced as user-facing messages.
+   */
+  private async persistNote(
+    ctx: Context,
+    input: { workspaceId: string; source: 'text' | 'voice'; body: string },
+  ): Promise<void> {
+    const { workspaceId, source, body } = input;
+    const ws = await this.prisma.workspace.findUniqueOrThrow({ where: { id: workspaceId } });
+
+    // 1. Generate slug (Sonnet — falls back internally on failure, never throws).
+    const slug = await this.slugService.generate(body);
+
+    // 2. Build vault path + file body with Source/Captured/Workspace header (NOTE-04).
+    const dateStr = new Date().toISOString().slice(0, 10); // UTC YYYY-MM-DD
+    const vaultPath = `raw/inbox/${dateStr}-${slug}.md`;
+    const fileBody =
+      `Source: Telegram (${source})\n` +
+      `Captured: ${new Date().toISOString()}\n` +
+      `Workspace: ${ws.name === 'work' ? 'Work' : 'Personal'}\n` +
+      `\n---\n\n` +
+      body;
+
+    // 3. Use a pre-generated noteId so the vault audit row can reference the note
+    //    and we can wire the [Undo] callback before knowing the commit SHA.
+    const noteId = randomUUID();
+
+    try {
+      const writeResult = await this.vault.writeFile({
+        vaultPath,
+        body: fileBody,
+        commitMessage: `note: capture ${slug}`,
+        kind: 'note',
+        sourceId: noteId,
+      });
+
+      // 4. Persist the Note row with the actual commit sha + post-collision vault path.
+      await this.prisma.note.create({
+        data: {
+          id: noteId,
+          workspaceId,
+          source,
+          body,
+          slug,
+          vaultPath: writeResult.vaultPath,
+          vaultCommitSha: writeResult.commitSha,
+        },
+      });
+
+      // 5. Reply with [Undo] inline keyboard.
+      const { text, extra } = this.formatter.formatNoteSaved({
+        noteId,
+        vaultPath: writeResult.vaultPath,
+        commitSha: writeResult.commitSha,
+      });
+      const sentMsg = await ctx.reply(text, extra as any);
+
+      // 6. Schedule keyboard removal at 60s (NOTE-06).
+      // Using .unref() so the timer does not prevent process shutdown.
+      const timer = setTimeout(() => {
+        ctx.telegram
+          .editMessageReplyMarkup(
+            sentMsg.chat.id,
+            sentMsg.message_id,
+            undefined,
+            { inline_keyboard: [] }, // NOT empty object — Telegram returns 400 otherwise
+          )
+          .catch((err: unknown) => {
+            const msg = String(err);
+            if (!msg.includes('message is not modified')) {
+              this.logger.warn(`Failed to clear undo keyboard: ${msg}`);
+            }
+          });
+      }, OrchestratorService.UNDO_WINDOW_MS);
+      timer.unref();
+    } catch (err) {
+      this.logger.error(`Vault write failed for note ${noteId}: ${err}`);
+      await ctx.reply(`❌ Failed to save note: ${String(err).slice(0, 200)}`);
+    }
+  }
+
+  /**
+   * Strip Telegram HTML and the formatTranscription chrome to recover the original transcript.
+   * Matches the output of MessageFormatterService.formatTranscription().
+   */
+  private extractTranscriptFromTranscriptionMessage(text: string): string | null {
+    // Telegram's reply_to_message.text is the plain-text rendering (HTML tags stripped),
+    // but the chrome from formatTranscription remains: "🎤 I heard:\n<body>\n\nProcessing..."
+    const match = text.match(/I heard:\s*\n([\s\S]+?)\n\nProcessing\.\.\./);
+    return match ? match[1].trim() : null;
+  }
+
+  /**
+   * Parse @work / @personal prefix from the start of a note body.
+   * Returns the workspace name (if any) and the stripped body.
+   */
+  private parseWorkspacePrefix(text: string): {
+    workspace: 'work' | 'personal' | null;
+    body: string;
+  } {
+    const m = text.match(/^@(work|personal)\s+([\s\S]+)$/i);
+    if (m) return { workspace: m[1].toLowerCase() as 'work' | 'personal', body: m[2].trim() };
+    return { workspace: null, body: text.trim() };
   }
 
   /**
