@@ -6,3 +6,4 @@ dashboard
 .git
 .env
 *.md
+cortex-local
