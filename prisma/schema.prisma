@@ -33,6 +33,12 @@ enum CommentSource {
   llm
 }
 
+enum MeetingSource {
+  meetily
+
+  @@map("meeting_source")
+}
+
 enum NoteSource {
   text
   voice
@@ -53,6 +59,7 @@ model Workspace {
   tasks            Task[]
   contacts         Contact[]
   notes            Note[]
+  meetings         Meeting[]
 
   @@map("workspaces")
 }
@@ -175,4 +182,40 @@ model Settings {
   updatedAt           DateTime @updatedAt @map("updated_at")
 
   @@map("settings")
+}
+
+model Meeting {
+  id             String        @id @default(uuid())
+  workspaceId    String        @map("workspace_id")
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id])
+  title          String
+  startedAt      DateTime      @map("started_at")
+  endedAt        DateTime      @map("ended_at")
+  attendeeEmails String[]      @map("attendee_emails")
+  transcript     String        @db.Text
+  source         MeetingSource
+  externalId     String?       @map("external_id")
+  vaultPath      String        @map("vault_path")
+  vaultCommitSha String        @map("vault_commit_sha")
+  createdAt      DateTime      @default(now()) @map("created_at")
+
+  @@unique([source, externalId], map: "meeting_external_id_unique")
+  @@index([workspaceId, createdAt])
+  @@index([startedAt])
+  @@map("meetings")
+}
+
+model Heartbeat {
+  id           String    @id @default(uuid())
+  host         String    @unique
+  version      String?
+  lastSeenAt   DateTime  @map("last_seen_at")
+  lastIngestAt DateTime? @map("last_ingest_at")
+  queueDepth   Int?      @map("queue_depth")
+  lastError    String?   @map("last_error")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@index([lastSeenAt])
+  @@map("heartbeats")
 }
