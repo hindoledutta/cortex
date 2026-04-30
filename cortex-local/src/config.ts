@@ -7,21 +7,6 @@ export const ConfigSchema = z.object({
   meetilyOutputDir: z.string().min(1),
   host: z.string().min(1).max(100),
   stateDir: z.string().min(1),
-  frontmatterFields: z
-    .object({
-      title: z.string().default('title'),
-      startedAt: z.string().default('started_at'),
-      endedAt: z.string().default('ended_at'),
-      attendees: z.string().default('attendees'),
-      externalId: z.string().default('meeting-id'),
-    })
-    .default({
-      title: 'title',
-      startedAt: 'started_at',
-      endedAt: 'ended_at',
-      attendees: 'attendees',
-      externalId: 'meeting-id',
-    }),
   heartbeatCron: z.string().default('0 9 * * *'),
 });
 

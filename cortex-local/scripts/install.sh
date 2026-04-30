@@ -91,7 +91,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   echo "Config already exists at ${CONFIG_FILE} — skipping prompts (delete the file to reconfigure)."
 else
   read -rp "Cortex API URL (e.g. https://cortex-hindole.fly.dev): " CORTEX_API_URL
-  read -rp "Meetily/exporter output directory (e.g. ~/Documents/Meetily/exports): " MEETILY_OUTPUT_RAW
+  read -rp "Meetily recordings directory (e.g. ~/Movies/meetily-recordings): " MEETILY_OUTPUT_RAW
   # Expand ~ to absolute path
   MEETILY_OUTPUT_DIR="${MEETILY_OUTPUT_RAW/#\~/$HOME}"
   read -rp "Hostname label for this machine (e.g. mac-mini-home): " HOSTNAME_LABEL

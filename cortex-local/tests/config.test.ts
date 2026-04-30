@@ -70,33 +70,7 @@ describe('loadConfig', () => {
     await fs.writeFile(file, JSON.stringify(VALID_CONFIG));
     const config = await loadConfig(file);
     expect(config.heartbeatCron).toBe('0 9 * * *');
-    expect(config.frontmatterFields.externalId).toBe('meeting-id');
-    expect(config.frontmatterFields.title).toBe('title');
-    expect(config.frontmatterFields.startedAt).toBe('started_at');
-    expect(config.frontmatterFields.endedAt).toBe('ended_at');
-    expect(config.frontmatterFields.attendees).toBe('attendees');
-  });
-
-  it('honors explicit frontmatterFields overrides', async () => {
-    const file = path.join(tmpDir, 'config.json');
-    await fs.writeFile(
-      file,
-      JSON.stringify({
-        ...VALID_CONFIG,
-        frontmatterFields: {
-          title: 'meeting_name',
-          startedAt: 'started',
-          endedAt: 'ended',
-          attendees: 'participants',
-          externalId: 'uid',
-        },
-      }),
-    );
-    const config = await loadConfig(file);
-    expect(config.frontmatterFields.title).toBe('meeting_name');
-    expect(config.frontmatterFields.startedAt).toBe('started');
-    expect(config.frontmatterFields.endedAt).toBe('ended');
-    expect(config.frontmatterFields.attendees).toBe('participants');
-    expect(config.frontmatterFields.externalId).toBe('uid');
+    expect(config.cortexApiUrl).toBe('https://cortex.example.com');
+    expect(config.host).toBe('mac-mini-home');
   });
 });
