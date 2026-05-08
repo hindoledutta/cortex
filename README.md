@@ -1,99 +1,298 @@
 # Cortex
 
-Intelligent task capture and management system for a single power user.
+Personal intelligence layer. Captures tasks, notes, and meetings via Telegram and commits them to a git-backed knowledge vault (nirvana-wiki). Proactively manages deadlines, calendar blocks, and follow-through.
 
-Cortex turns unstructured voice and text brain dumps — sent via Telegram — into structured, trackable task hierarchies using LLM-powered decomposition. It then proactively manages timelines, calendar commitments, and follow-through, with a React PWA dashboard as the secondary view.
-
-> **Status:** active development. Solo-built, not intended for multi-user deployment.
+> **Status:** Active development. Solo-built for a single power user.
 
 ---
 
-## What it does
+## Interfaces
 
-**Zero-friction capture.** Talk or type to a Telegram bot. Voice is transcribed by Whisper; text is processed as-is. Within seconds you get back a parent task with sub-tasks, priorities, and contextual follow-up questions — no manual organizing.
-
-**Conversational enrichment.** The bot asks one question at a time to fill in deadlines, stakeholders, and whether to block time on your calendar. Session context is held in Redis for 30 minutes so follow-ups merge into existing tasks instead of creating duplicates.
-
-**Workspace separation.** Personal and Work are hard boundaries. A static default applies; `@work` or `@personal` overrides it for a single message.
-
-**Proactive management.** Deadline reminders fire via Telegram at configurable lead times. Stale `in_progress` tasks get a check-in. Deferred tasks resurface on their resume date.
-
-**Google Calendar integration.** Tasks with deadlines can spawn calendar events with resolved stakeholder attendees (via a contacts directory) and suggested time blocks based on effort.
-
-**Dashboard (PWA).** Kanban + list views, filters by workspace/status/deadline, offline-first with IndexedDB + service worker. Supplementary — Telegram is the primary surface.
+| Surface | URL / Access | Primary use |
+|---|---|---|
+| **Telegram bot** | Your bot via `@BotFather` | Everything — capture, action, query |
+| **Dashboard (PWA)** | Deployed Cloudflare Pages URL | Browse, filter, kanban task management |
+| **nirvana-wiki** | GitHub repo | Notes and meeting transcripts (git-backed) |
+| **Fly.io logs** | `fly logs` | Debug and monitor |
 
 ---
 
-## Core flow
+## Telegram — Commands
 
-```
-Telegram voice/text
-  → Whisper (voice only)
-  → Claude Sonnet classifies (simple task | brain dump | update | command)
-  → Claude Opus decomposes brain dumps into parent + sub-tasks
-  → Persist to Postgres (Prisma)
-  → Generate follow-up question + inline keyboard (Done / Start / Defer / Edit)
-  → Session kept in Redis for 30 min
-  → BullMQ schedules reminders / check-ins / Calendar events
-```
-
----
-
-## Architecture
-
-Event-driven modular monolith on NestJS. Modules aligned to business domains, not technical layers.
-
-| Module | Responsibility |
+| Command | What it does |
 |---|---|
-| `telegram/` | Webhook intake, message sending, inline-keyboard callbacks, voice download |
-| `llm/` | Claude (Opus + Sonnet) orchestration, Whisper transcription, prompts, response parsing |
-| `task/` | Task lifecycle, sub-tasks, comments, status transitions |
-| `calendar/` | Google OAuth, event creation, attendee resolution, time-blocking |
-| `scheduler/` | BullMQ job processors for reminders, check-ins, resurfacing |
-| `workspace/` | Personal/Work scoping |
-| `session/` | Redis-backed 30-min conversation context |
-| `settings/` | Per-user preferences (reminder lead times, defaults) |
+| `/start` | Greeting and quick-start prompt |
+| `/help` | List all commands |
+| `/tasks` | Show up to 10 open parent tasks with action buttons |
+| `/workspace` | Show current default workspace (Work or Personal) |
+| `/workspace work` | Switch default workspace to Work |
+| `/workspace personal` | Switch default workspace to Personal |
+| `/settings` | Show current config (workspace, session timeout, AI model) |
+| `/note <text>` | Capture an inline text note → commits to `raw/inbox/` in nirvana-wiki |
+| `/note` | Arm voice note capture — send a voice message within 5 min |
+| `/vault` | Show the last 10 items committed to nirvana-wiki |
 
-**Tiered LLM routing** balances quality and cost: Claude Opus for free-flowing decomposition, Claude Sonnet for well-defined structured operations (classification, follow-up generation, comment extraction).
+### Workspace prefix override
 
----
-
-## Tech stack
-
-- **Backend:** NestJS 11, TypeScript, Prisma ORM
-- **Database:** PostgreSQL (Neon)
-- **Queue + Sessions:** Redis via Upstash (BullMQ + session store)
-- **LLM:** Anthropic Claude (Opus + Sonnet) via `@anthropic-ai/sdk`; OpenAI Whisper for voice
-- **Bot:** Telegraf (webhook mode)
-- **Frontend:** React + Vite + TanStack Router + TanStack Query + Tailwind + shadcn/ui
-- **Hosting:** Fly.io (backend), Cloudflare Pages (dashboard)
-
----
-
-## Project layout
+Prefix any message with `@work` or `@personal` to override your default workspace for that message only:
 
 ```
-src/                Backend NestJS source
-  telegram/         Webhook + message orchestration
-  llm/              Claude + Whisper services, prompts
-  task/             Task domain + controller (REST)
-  calendar/         Google Calendar integration
-  scheduler/        BullMQ job processors
-  workspace/        Workspace scoping
-  session/          Redis session store
-  settings/         User settings
-prisma/             Schema, migrations, seed
-dashboard/          React PWA (Vite)
-scripts/            One-off utilities (e.g. google-oauth-setup)
-docs/hld.md         High-level design
-.planning/          Phase-based planning artifacts (GSD)
+@work Prep slides for investor call Thursday
+@personal Book dentist appointment
+```
+
+---
+
+## Telegram — Message types
+
+### Text brain dump
+
+Send any text and Cortex classifies it:
+
+- **Brain dump** → Claude decomposes into a parent task + sub-tasks. You get back the task tree, priorities, and one follow-up question if gaps were detected.
+- **Follow-up answer** → Enriches the last task in session (fills deadline, stakeholders, etc.). Session lasts 30 min.
+- **Comment** (reply to a bot task message) → Adds a comment to that task and extracts action items as sub-tasks.
+- **Direct calendar booking** → "Schedule call with Sarah on Tuesday at 2pm" → extraction + [Confirm] / [Cancel].
+- **Unclear** → Cortex asks for clarification.
+
+### Voice message
+
+Send a voice note (up to 10 min). Cortex transcribes via Whisper, shows "🎤 I heard: …", then routes identically to a text message.
+
+If a bare `/note` session is active, the voice is saved as a note instead.
+
+---
+
+## Telegram — Inline buttons
+
+### Task buttons
+
+After a task is created you get action buttons. Each edits the message in place.
+
+| Button | Result |
+|---|---|
+| ✅ Done | Status → `done` |
+| ▶️ Start | Status → `in_progress` |
+| ⏸️ Defer | Status → `deferred` |
+| ✏️ Edit | Prompts "Reply with changes for this task" |
+| 📅 Calendar | Extracts effort, resolves attendees, creates Google Calendar event |
+| ⏰ Suggest Time | Queries your calendar, shows up to 5 free time blocks before the deadline |
+
+### Calendar / time-block buttons
+
+| Button | Result |
+|---|---|
+| Accept #N | Creates calendar event at suggested slot |
+| Dismiss All | Closes the suggestion message |
+| Confirm / Cancel | Confirm or cancel a direct booking |
+
+### Note button
+
+| Button | Window | Result |
+|---|---|---|
+| [Undo] | 60 sec | Reverts git commit, soft-deletes the note |
+
+### Workspace prompt
+
+When Cortex can't determine workspace from context it asks:
+
+| Button | Result |
+|---|---|
+| 💼 Work | Creates tasks in Work workspace |
+| 🏠 Personal | Creates tasks in Personal workspace |
+
+---
+
+## Notes — capture and vault
+
+Every note lands in nirvana-wiki at `raw/inbox/YYYY-MM-DD-{slug}.md` with this format:
+
+```markdown
+Source: Telegram (text|voice)
+Captured: 2026-05-08T11:30:00Z
+Workspace: Work
+
+---
+
+{your note body}
+```
+
+The vault write is mutex-serialized: fetch → reset to origin/main → write → commit → push (one rebase retry on conflict). Every write (success or failure) is recorded in the `VaultWrite` audit table.
+
+---
+
+## Meetings — Fathom
+
+Fathom pushes a webhook to Cortex when a recording is processed. Cortex writes to `raw/meetings/YYYY-MM-DD-{slug}.md`:
+
+```markdown
+Source: Fathom
+Date: 2026-05-08
+Started: 09:00
+Ended: 09:47
+Attendees: alice@example.com, bob@example.com
+
+---
+
+## Summary
+
+{Fathom AI summary}
+
+## Action Items
+
+- Item one
+- Item two
+
+## Transcript
+
+[00:00:05] Alice: ...
+[00:00:10] Bob: ...
+```
+
+You get a Telegram notification: `📝 Meeting captured — "Title" (47 min, 2 attendees) → raw/meetings/...`
+
+### Backfill existing recordings
+
+```bash
+# Dry-run (no writes)
+FATHOM_API_KEY=... npm run fathom-backfill
+
+# Ingest all
+FATHOM_API_KEY=... CORTEX_PUBLIC_URL=https://cortex-hindole.fly.dev \
+CORTEX_LOCAL_SHARED_SECRET=... npm run fathom-backfill -- --ingest
+
+# Single recording by recording_id
+... npm run fathom-backfill -- --ingest --id 144682304
+```
+
+---
+
+## Meetings — Meetily / cortex-local (Mac mini)
+
+The cortex-local daemon on the Mac mini watches Meetily's output folder and POSTs transcripts to Cortex. It pings a heartbeat daily; if silent for >26 hours you get a Telegram alert.
+
+### Install
+
+```bash
+cd cortex-local
+bash scripts/install.sh   # interactive — sets API URL, shared secret, watch dir
+```
+
+### What gets installed
+
+| Item | Path |
+|---|---|
+| Config | `~/Library/Application Support/cortex-local/config.json` |
+| Logs | `~/Library/Logs/cortex-local.out.log` / `.err.log` |
+| Launchd plist | `~/Library/LaunchAgents/com.cortex.local.plist` |
+
+Auto-restarts on crash (ThrottleInterval 30s). Starts on login.
+
+### Validate before going live
+
+```bash
+cd cortex-local
+npm run dry-run -- /path/to/sample-meeting-folder
+```
+
+---
+
+## Dashboard (PWA)
+
+Secondary surface for browsing and managing tasks.
+
+### Views
+
+**Kanban** (default) — columns: captured / active / in_progress / done / blocked / deferred. Drag cards to change status. Click a card to open the detail dialog.
+
+**List view** — sortable table with title, status, priority, deadline, last updated.
+
+**Task detail dialog** — edit all fields, view sub-tasks, comments, calendar events, delete.
+
+**Filters (top bar)** — workspace, status (multi-select), deadline (overdue / this week / this month / none). Applied client-side.
+
+Offline-first: IndexedDB caches task data; service worker serves cached views without connectivity.
+
+---
+
+## Proactive notifications
+
+Cortex sends these automatically — no user action needed.
+
+| Notification | Trigger | Format |
+|---|---|---|
+| ⏰ Deadline reminder | Task deadline − lead time (default 24h) | Task title, deadline, [Done] [Start] [Defer] buttons |
+| 📋 Check-in | Task `in_progress` for N days without update | "How's {title} going?" + status buttons |
+| 🔄 Resurfaced | Deferred task's resume date reached | "Ready to pick up?" + [Start] [Done] [Defer] |
+| 📝 Meeting captured | After successful vault write | Title, duration, attendee count, vault path |
+| ⚠️ cortex-local silent | Daemon hasn't pinged in >26h | Host, hours since last seen |
+| ⚠️ Upload failed | Daemon `last_error` changes | Host + error text |
+
+---
+
+## Google Calendar
+
+Tasks support two calendar flows:
+
+**Block time (📅 button):** Cortex extracts estimated effort from the task, resolves attendee names to emails via the contacts directory (prompts for unknowns), and creates an event at deadline − effort, clamped to working hours (09:30–20:00 in your timezone).
+
+**Suggest time (⏰ button):** Queries freeBusy across all configured calendars, returns up to 5 free slots before the deadline. Each slot is a button — tap to accept.
+
+**Direct booking (text message):** "Schedule 30 min with Sarah next Tuesday at 10am" → Cortex extracts details, shows a confirmation message, checks for conflicts, then books.
+
+---
+
+## Deployment
+
+### Backend (Fly.io)
+
+```bash
+fly deploy
+```
+
+Release command (`fly.toml`) runs `npx prisma migrate deploy` automatically.
+
+Secrets (set via `fly secrets set KEY=VALUE`):
+
+```
+DATABASE_URL
+REDIS_URL
+ANTHROPIC_API_KEY
+OPENAI_API_KEY
+TELEGRAM_BOT_TOKEN
+OWNER_CHAT_ID
+WEBHOOK_DOMAIN
+GOOGLE_CLIENT_ID
+GOOGLE_CLIENT_SECRET
+GOOGLE_REFRESH_TOKEN
+GOOGLE_CALENDAR_IDS
+USER_TIMEZONE
+NIRVANA_WIKI_REPO_URL
+NIRVANA_WIKI_LOCAL_DIR
+NIRVANA_WIKI_SSH_KEY_PATH
+NIRVANA_WIKI_DEPLOY_KEY_B64
+CORTEX_LOCAL_SHARED_SECRET
+FATHOM_WEBHOOK_SECRET
+```
+
+### Dashboard (Cloudflare Pages)
+
+```bash
+cd dashboard
+npm run build
+# deploy via wrangler or Cloudflare Pages CI
+```
+
+### Database (Neon)
+
+```bash
+npx prisma migrate deploy   # applies pending migrations
+npx prisma db seed          # seeds workspaces
 ```
 
 ---
 
 ## Local development
-
-Prereqs: Node 20+, pnpm or npm, Postgres, Redis, a Telegram bot token (from @BotFather), Anthropic API key, OpenAI API key, Google OAuth credentials.
 
 ```bash
 # 1. Install
@@ -102,53 +301,79 @@ cd dashboard && npm install && cd ..
 
 # 2. Configure
 cp .env.example .env
-# fill in DATABASE_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY,
-# TELEGRAM_BOT_TOKEN, OWNER_CHAT_ID, GOOGLE_CLIENT_ID/SECRET, REDIS_URL
+# fill in DATABASE_URL, REDIS_URL, ANTHROPIC_API_KEY, OPENAI_API_KEY,
+# TELEGRAM_BOT_TOKEN, OWNER_CHAT_ID, WEBHOOK_DOMAIN, GOOGLE_*, NIRVANA_WIKI_*
 
 # 3. Database
 npx prisma migrate dev
 npx prisma db seed
 
-# 4. Google Calendar OAuth (one-time, produces refresh token for .env)
-npx ts-node scripts/google-oauth-setup.ts
+# 4. Google Calendar OAuth (one-time)
+npx tsx scripts/google-oauth-setup.ts
 
 # 5. Run
-npm run start:dev                  # backend at :3000
-cd dashboard && npm run dev        # dashboard at :5173
+npm run start:dev            # backend at :3000
+cd dashboard && npm run dev  # dashboard at :5173
 ```
 
-Telegram webhook is set on boot from `TELEGRAM_WEBHOOK_URL`. For local testing, use `ngrok` or run Telegraf in long-polling mode (set `TELEGRAM_MODE=polling`).
+For local Telegram testing: use ngrok for a public URL, or set `TELEGRAM_MODE=polling` in `.env`.
 
 ---
 
-## Deployment
+## Scripts reference
 
-- **Backend** → Fly.io via [`fly.toml`](fly.toml) and [`Dockerfile`](Dockerfile). `fly deploy`.
-- **Dashboard** → Cloudflare Pages / Vercel. See [`dashboard/wrangler.toml`](dashboard/wrangler.toml).
-- **Database** → Neon Postgres (free tier).
-- **Redis** → Upstash (free tier).
-
-Target monthly cost: ~$20 (LLM inference dominates; infra is free-tier).
-
----
-
-## Scope boundaries
-
-**In scope**
-- Solo use, Telegram-first, Google Calendar, PWA dashboard
-
-**Explicitly out of scope**
-- Multi-user / teams
-- File attachments
-- Recurring tasks
-- Integrations beyond Google Calendar (no Slack, Jira, etc.)
-- Native mobile apps
-- Email notifications
+| Script | When to use |
+|---|---|
+| `npm run register-fathom-webhook` | One-time: register Cortex's URL with Fathom. Outputs the webhook secret. |
+| `npm run fathom-backfill` | Dry-run list of all Fathom recordings. |
+| `npm run fathom-backfill -- --ingest` | Ingest all Fathom recordings into nirvana-wiki. |
+| `npm run fathom-backfill -- --ingest --id <n>` | Ingest a single recording by `recording_id`. |
+| `npx tsx scripts/google-oauth-setup.ts` | One-time: Google Calendar OAuth flow (produces refresh token). |
+| `scripts/entrypoint.sh` | Fly.io startup: materializes SSH key, runs migrations, starts server. |
 
 ---
 
-## License
+## Tech stack
 
-[MIT](LICENSE) © 2026 Hindole Dutta
+| Layer | Technology |
+|---|---|
+| Backend | NestJS 11, TypeScript, Prisma |
+| Database | PostgreSQL (Neon) |
+| Queue / sessions | Redis via Upstash (pg-boss + session store) |
+| LLM | Claude Opus (decomposition) + Sonnet (classification, extraction) |
+| Voice | OpenAI Whisper |
+| Bot | Telegraf (webhook mode) |
+| Frontend | React + Vite + TanStack Router/Query + Tailwind + shadcn/ui |
+| Hosting | Fly.io (backend) + Cloudflare Pages (dashboard) |
+| Vault | Git (nirvana-wiki, SSH push) |
 
-See [`docs/hld.md`](docs/hld.md) for the full design document and [`.planning/`](.planning/) for phase-by-phase build artifacts.
+---
+
+## Project layout
+
+```
+src/                  NestJS backend
+  telegram/           Webhook intake, message routing, inline keyboards
+  llm/                Claude + Whisper, prompts, response parsing
+  task/               Task lifecycle + REST controller
+  meetings/           Ingest endpoint + Fathom webhook controller
+  note/               Note capture service
+  calendar/           Google Calendar integration
+  scheduler/          pg-boss job processors (reminders, check-ins, resurfacing)
+  vault/              Git-backed file writer (mutex-serialized)
+  heartbeat/          cortex-local liveness monitoring
+  workspace/          Work/Personal scoping
+  session/            Redis-backed 30-min conversation context
+  settings/           Per-user preferences
+  auth/               SharedSecretGuard, FathomWebhookGuard
+prisma/               Schema, migrations, seed
+dashboard/            React PWA
+cortex-local/         Mac mini daemon (Meetily watcher + heartbeat)
+scripts/              One-off utilities
+docs/hld.md           Full high-level design
+.planning/            GSD phase-based planning artifacts
+```
+
+---
+
+See [`docs/hld.md`](docs/hld.md) for the full design document and [`.planning/`](.planning/) for phase-by-phase build history.
