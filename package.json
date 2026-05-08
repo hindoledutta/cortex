@@ -11,7 +11,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:cov": "vitest run --coverage",
-    "register-fathom-webhook": "tsx scripts/fathom-register-webhook.ts"
+    "register-fathom-webhook": "tsx scripts/fathom-register-webhook.ts",
+    "fathom-backfill": "tsx scripts/fathom-backfill.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
