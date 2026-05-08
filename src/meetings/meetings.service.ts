@@ -22,7 +22,7 @@ export class MeetingsService {
     // Idempotency check — skip if external_id already ingested.
     if (p.external_id) {
       const existing = await this.prisma.meeting.findFirst({
-        where: { source: 'meetily', externalId: p.external_id },
+        where: { source: p.source, externalId: p.external_id },
       });
       if (existing) {
         this.logger.log(
@@ -52,21 +52,10 @@ export class MeetingsService {
     const dateStr = startedAt.toISOString().slice(0, 10);
     const vaultPath = `raw/meetings/${dateStr}-${slug}.md`;
 
-    // Verbatim body per HLD §3.8 B-MEET-4.
-    const startedFmt = startedAt.toISOString().slice(11, 16);   // HH:MM UTC
+    const startedFmt = startedAt.toISOString().slice(11, 16);
     const endedFmt = endedAt.toISOString().slice(11, 16);
     const attendeesLine = p.attendees.length > 0 ? p.attendees.join(', ') : '(unknown)';
-    const body = [
-      `Source: Meetily (Google Meet)`,
-      `Date: ${dateStr}`,
-      `Started: ${startedFmt}`,
-      `Ended: ${endedFmt}`,
-      `Attendees: ${attendeesLine}`,
-      ``,
-      `---`,
-      ``,
-      p.transcript,
-    ].join('\n');
+    const body = this.buildBody(p, dateStr, startedFmt, endedFmt, attendeesLine);
 
     const meetingId = randomUUID();
 
@@ -88,7 +77,7 @@ export class MeetingsService {
         endedAt,
         attendeeEmails: p.attendees,
         transcript: p.transcript,
-        source: 'meetily',
+        source: p.source,
         externalId: p.external_id ?? null,
         vaultPath: writeResult.vaultPath,
         vaultCommitSha: writeResult.commitSha,
@@ -113,5 +102,36 @@ export class MeetingsService {
       vault_path: writeResult.vaultPath,
       commit_sha: writeResult.commitSha,
     };
+  }
+
+  private buildBody(
+    p: IngestPayload,
+    dateStr: string,
+    startedFmt: string,
+    endedFmt: string,
+    attendeesLine: string,
+  ): string {
+    const sourceLabel = p.source === 'fathom' ? 'Fathom' : 'Meetily (Google Meet)';
+    const header = [
+      `Source: ${sourceLabel}`,
+      `Date: ${dateStr}`,
+      `Started: ${startedFmt}`,
+      `Ended: ${endedFmt}`,
+      `Attendees: ${attendeesLine}`,
+      ``,
+      `---`,
+      ``,
+    ].join('\n');
+
+    if (p.source === 'fathom' && (p.summary || p.action_items?.length)) {
+      const parts: string[] = [];
+      if (p.summary) parts.push('## Summary', '', p.summary, '');
+      if (p.action_items?.length) {
+        parts.push('## Action Items', '', ...p.action_items.map((i) => `- ${i}`), '');
+      }
+      parts.push('## Transcript', '', p.transcript);
+      return header + parts.join('\n');
+    }
+    return header + p.transcript;
   }
 }

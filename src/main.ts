@@ -20,6 +20,12 @@ async function bootstrap() {
     credentials: true,
   });
 
+  // Capture raw bytes for Fathom webhook HMAC verification — must precede the general json() parser.
+  app.use('/api/meetings/fathom-webhook', json({
+    limit: '5mb',
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+  }));
+
   // Raise body-parser limit to 5MB so 1h meeting transcripts (50-200KB typical, up to ~1.5MB) do not 413.
   // MUST come BEFORE bot.webhookCallback so Telegraf installs its own parser AFTER ours for the webhook path.
   app.use(json({ limit: '5mb' }));

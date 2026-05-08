@@ -18,6 +18,22 @@ const VALID_PAYLOAD: IngestPayload = {
   external_id: undefined,
 };
 
+const FATHOM_PAYLOAD: IngestPayload = {
+  title: 'Design Review',
+  started_at: '2026-05-01T14:00:00Z',
+  ended_at: '2026-05-01T14:45:00Z',
+  attendees: ['carol@example.com'],
+  transcript: '[00:00:05] Carol: Let us begin.',
+  source: 'fathom',
+  external_id: '99',
+};
+
+const FATHOM_PAYLOAD_ENRICHED: IngestPayload = {
+  ...FATHOM_PAYLOAD,
+  summary: '## Key Points\nWe reviewed the designs.',
+  action_items: ['Update wireframes', 'Schedule follow-up'],
+};
+
 const VAULT_RESULT = {
   commitSha: 'deadbeef',
   vaultPath: 'raw/meetings/2026-04-26-q2-roadmap-review.md',
@@ -177,5 +193,65 @@ describe('MeetingsService', () => {
     // Ingest should still succeed
     expect(result.meeting_id).toBeDefined();
     expect(meetingCreate).toHaveBeenCalledOnce();
+  });
+
+  describe('Fathom source', () => {
+    it('body uses "Source: Fathom" header for fathom payloads', async () => {
+      await service.ingest(FATHOM_PAYLOAD);
+
+      const writeArgs = vaultWriteFile.mock.calls[0][0];
+      expect(writeArgs.body).toContain('Source: Fathom');
+      expect(writeArgs.body).not.toContain('Meetily');
+    });
+
+    it('body with enrichment includes ## Summary, ## Action Items, ## Transcript sections', async () => {
+      await service.ingest(FATHOM_PAYLOAD_ENRICHED);
+
+      const writeArgs = vaultWriteFile.mock.calls[0][0];
+      const body: string = writeArgs.body;
+      expect(body).toContain('## Summary');
+      expect(body).toContain('## Key Points');
+      expect(body).toContain('## Action Items');
+      expect(body).toContain('- Update wireframes');
+      expect(body).toContain('- Schedule follow-up');
+      expect(body).toContain('## Transcript');
+      expect(body).toContain(FATHOM_PAYLOAD_ENRICHED.transcript);
+    });
+
+    it('body without enrichment degrades to transcript-only (no ## sections)', async () => {
+      await service.ingest(FATHOM_PAYLOAD);
+
+      const writeArgs = vaultWriteFile.mock.calls[0][0];
+      const body: string = writeArgs.body;
+      expect(body).not.toContain('## Summary');
+      expect(body).not.toContain('## Action Items');
+      expect(body).toContain(FATHOM_PAYLOAD.transcript);
+    });
+
+    it('idempotency query uses p.source, not hardcoded meetily', async () => {
+      const existing = {
+        id: 'fathom-existing',
+        vaultPath: 'raw/meetings/2026-05-01-design-review.md',
+        vaultCommitSha: 'babe5678',
+      };
+      meetingFindFirst.mockResolvedValue(existing);
+
+      const result = await service.ingest(FATHOM_PAYLOAD);
+
+      expect(meetingFindFirst).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({ source: 'fathom', externalId: '99' }),
+        }),
+      );
+      expect(vaultWriteFile).not.toHaveBeenCalled();
+      expect(result.meeting_id).toBe('fathom-existing');
+    });
+
+    it('persists source=fathom in the database row', async () => {
+      await service.ingest(FATHOM_PAYLOAD);
+
+      const createArgs = meetingCreate.mock.calls[0][0].data;
+      expect(createArgs.source).toBe('fathom');
+    });
   });
 });
