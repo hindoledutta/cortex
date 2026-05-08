@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
 - [ ] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
 - [x] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
-- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), `/api/meetings/ingest` endpoint, Meetily integration, vault write to `raw/meetings/`, Telegram notification, `/vault recent`
+- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), `/api/meetings/ingest` endpoint, Meetily integration, vault write to `raw/meetings/`, Telegram notification, `/vault recent` *(code complete; human checkpoint pending)*
 
 ## Phase Details
 
@@ -148,8 +148,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07b-01-PLAN.md -- Schema (Meeting, Heartbeat), MeetingsController + `/api/meetings/ingest`, `/api/heartbeat` endpoint + heartbeat-staleness scheduled job, `/vault recent` command
-- [ ] 07b-02-PLAN.md -- `cortex-local` daemon (chokidar watcher, file-stable detection, POST + retry, ingest marker, daily heartbeat ping, launchd plist, install script)
+- [x] 07b-01-PLAN.md -- Schema (Meeting, Heartbeat), MeetingsController + `/api/meetings/ingest`, `/api/heartbeat` endpoint + heartbeat-staleness scheduled job, `/vault recent` command
+- [x] 07b-02-PLAN.md -- `cortex-local` daemon (chokidar watcher, file-stable detection, POST + retry, ingest marker, daily heartbeat ping, launchd plist, install script)
 
 ## Progress
 
@@ -166,4 +166,4 @@ Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if 
 | 5. Calendar Integration | 0/? | Not started | - |
 | 6. Web Dashboard | 0/? | Not started | - |
 | 7a. Note Capture | 2/2 | Complete | 2026-04-30 |
-| 7b. Meeting Capture | 0/2 | Not started | - |
+| 7b. Meeting Capture | 2/2 | In Progress | - |
