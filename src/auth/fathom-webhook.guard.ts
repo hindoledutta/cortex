@@ -16,10 +16,10 @@ export class FathomWebhookGuard implements CanActivate {
   private static readonly TOLERANCE_MS = 5 * 60 * 1000;
 
   constructor(private readonly config: ConfigService) {
-    this.secret = Buffer.from(
-      this.config.getOrThrow<string>('FATHOM_WEBHOOK_SECRET'),
-      'utf8',
-    );
+    const raw = this.config.getOrThrow<string>('FATHOM_WEBHOOK_SECRET');
+    // Fathom uses Svix: secret is "whsec_<base64>". Decode the base64 portion.
+    const b64 = raw.startsWith('whsec_') ? raw.slice(6) : raw;
+    this.secret = Buffer.from(b64, 'base64');
   }
 
   canActivate(context: ExecutionContext): boolean {

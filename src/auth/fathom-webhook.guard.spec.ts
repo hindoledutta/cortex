@@ -4,7 +4,9 @@ import { createHmac } from 'node:crypto';
 import { FathomWebhookGuard } from './fathom-webhook.guard';
 import type { ExecutionContext } from '@nestjs/common';
 
-const VALID_SECRET = 'test-webhook-secret-for-fathom-hmac';
+// Simulate a real Fathom whsec_ secret: base64-encode some random bytes, prepend prefix.
+const RAW_KEY = Buffer.from('super-secret-key-bytes-for-testing');
+const VALID_SECRET = `whsec_${RAW_KEY.toString('base64')}`;
 
 function makeConfigService(secret: string): ConfigService {
   return {
@@ -12,9 +14,15 @@ function makeConfigService(secret: string): ConfigService {
   } as unknown as ConfigService;
 }
 
+// Mirror the guard's decoding: strip whsec_ prefix and base64-decode.
+function secretToKey(secret: string): Buffer {
+  const b64 = secret.startsWith('whsec_') ? secret.slice(6) : secret;
+  return Buffer.from(b64, 'base64');
+}
+
 function makeHmacSig(secret: string, id: string, ts: string, body: string): string {
   const toSign = `${id}.${ts}.${body}`;
-  const b64 = createHmac('sha256', Buffer.from(secret, 'utf8')).update(toSign).digest('base64');
+  const b64 = createHmac('sha256', secretToKey(secret)).update(toSign).digest('base64');
   return `v1,${b64}`;
 }
 
@@ -113,7 +121,7 @@ describe('FathomWebhookGuard', () => {
     const guard = new FathomWebhookGuard(makeConfigService(VALID_SECRET));
     const ts = nowTs();
     const body = '{"id":1}';
-    const wrongSig = makeHmacSig('wrong-secret', 'id-1', ts, body);
+    const wrongSig = makeHmacSig(`whsec_${Buffer.from('different-key').toString('base64')}`, 'id-1', ts, body);
     const ctx = makeContext({
       webhookId: 'id-1',
       webhookTs: ts,
