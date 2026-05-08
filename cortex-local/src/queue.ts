@@ -4,6 +4,15 @@ import type { IngestPayload, QueuedItem } from './types.js';
 
 const QUEUE_FILE = 'queue.json';
 
+// Serialize all queue writes — prevents concurrent enqueue/dequeue calls
+// from racing on queue.json.tmp → queue.json rename
+let writeChain = Promise.resolve();
+function serialized<T>(fn: () => Promise<T>): Promise<T> {
+  const next = writeChain.then(fn, fn);
+  writeChain = next.then(() => {}, () => {});
+  return next;
+}
+
 async function readQueue(stateDir: string): Promise<QueuedItem[]> {
   try {
     const raw = await fs.readFile(path.join(stateDir, QUEUE_FILE), 'utf8');
@@ -29,24 +38,19 @@ export async function enqueue(
   filePath: string,
   payload: IngestPayload,
 ): Promise<void> {
-  const items = await readQueue(stateDir);
-  // Deduplicate by filePath — don't add if already pending
-  if (items.some((item) => item.filePath === filePath)) {
-    return;
-  }
-  items.push({
-    filePath,
-    payload,
-    enqueuedAt: new Date().toISOString(),
-    attempts: 0,
+  return serialized(async () => {
+    const items = await readQueue(stateDir);
+    if (items.some((item) => item.filePath === filePath)) return;
+    items.push({ filePath, payload, enqueuedAt: new Date().toISOString(), attempts: 0 });
+    await writeQueue(stateDir, items);
   });
-  await writeQueue(stateDir, items);
 }
 
 export async function dequeue(stateDir: string, filePath: string): Promise<void> {
-  const items = await readQueue(stateDir);
-  const filtered = items.filter((item) => item.filePath !== filePath);
-  await writeQueue(stateDir, filtered);
+  return serialized(async () => {
+    const items = await readQueue(stateDir);
+    await writeQueue(stateDir, items.filter((item) => item.filePath !== filePath));
+  });
 }
 
 export async function depth(stateDir: string): Promise<number> {
