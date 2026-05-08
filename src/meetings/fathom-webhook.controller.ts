@@ -16,6 +16,7 @@ const FathomTranscriptLineSchema = z.object({
     .object({
       display_name: z.string().optional(),
       email: z.string().optional(),
+      matched_calendar_invitee_email: z.string().nullable().optional(),
     })
     .optional(),
   text: z.string(),
@@ -26,23 +27,38 @@ const FathomTranscriptLineSchema = z.object({
 // but don't publish the exact webhook payload field names. The transform()
 // method handles all documented candidate keys in priority order.
 const FathomWebhookPayloadSchema = z.object({
-  id: z.number().int(),
   recording_id: z.union([z.string(), z.number()]),
   title: z.string().optional(),
-  meeting_name: z.string().optional(),
+  meeting_title: z.string().optional(),
+  // Actual timestamp field names observed from Fathom API
+  recording_start_time: z.string().optional(),
+  recording_end_time: z.string().optional(),
+  scheduled_start_time: z.string().optional(),
+  scheduled_end_time: z.string().optional(),
+  // Legacy / webhook-only candidates kept for safety
   started_at: z.string().optional(),
-  created_at: z.string().optional(),
   ended_at: z.string().optional(),
+  created_at: z.string().optional(),
   updated_at: z.string().optional(),
   calendar_invitees: z
     .array(z.object({ email: z.string() }))
+    .optional(),
+  // Fathom API returns summary as default_summary; webhook may use summary
+  default_summary: z
+    .object({ markdown_formatted: z.string().optional() })
     .optional(),
   summary: z
     .object({ markdown_formatted: z.string().optional() })
     .optional(),
   transcript: z.array(FathomTranscriptLineSchema).optional(),
+  // Action items use description field (confirmed from API response)
   action_items: z
-    .array(z.union([z.string(), z.object({ text: z.string() })]))
+    .array(
+      z.union([
+        z.string(),
+        z.object({ description: z.string().optional(), text: z.string().optional() }),
+      ]),
+    )
     .optional(),
 });
 
@@ -69,9 +85,11 @@ export class FathomWebhookController {
   }
 
   private transform(p: FathomWebhookPayload) {
-    const title = p.title ?? p.meeting_name ?? `Fathom Meeting ${p.id}`;
-    const startedRaw = p.started_at ?? p.created_at ?? new Date().toISOString();
-    const endedRaw = p.ended_at ?? p.updated_at ?? startedRaw;
+    const title = p.title ?? p.meeting_title ?? `Fathom Meeting ${p.recording_id}`;
+    const startedRaw =
+      p.recording_start_time ?? p.scheduled_start_time ?? p.started_at ?? p.created_at ?? new Date().toISOString();
+    const endedRaw =
+      p.recording_end_time ?? p.scheduled_end_time ?? p.ended_at ?? p.updated_at ?? startedRaw;
 
     const toIso = (value: string, ctx: string): string => {
       const d = new Date(value);
@@ -89,8 +107,12 @@ export class FathomWebhookController {
     });
 
     const action_items = (p.action_items ?? []).map((i) =>
-      typeof i === 'string' ? i : i.text,
-    );
+      typeof i === 'string' ? i : (i.description ?? i.text ?? ''),
+    ).filter(Boolean);
+
+    // default_summary is the actual field name from Fathom API; summary may appear in webhooks
+    const summary =
+      p.default_summary?.markdown_formatted ?? p.summary?.markdown_formatted;
 
     return {
       source: 'fathom' as const,
@@ -100,9 +122,7 @@ export class FathomWebhookController {
       attendees: (p.calendar_invitees ?? []).map((i) => i.email).filter(Boolean),
       transcript: transcriptLines.join('\n') || '(no transcript)',
       external_id: String(p.recording_id),
-      ...(p.summary?.markdown_formatted
-        ? { summary: p.summary.markdown_formatted }
-        : {}),
+      ...(summary ? { summary } : {}),
       ...(action_items.length > 0 ? { action_items } : {}),
     };
   }

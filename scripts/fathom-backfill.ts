@@ -48,18 +48,27 @@ function toIso(value: string | undefined, fallback: string): string {
 
 function buildIngestPayload(meeting: any) {
   const now = new Date().toISOString();
-  const title =
-    meeting.title ?? meeting.meeting_name ?? `Fathom Meeting ${meeting.id}`;
-  const startedAt = toIso(meeting.started_at ?? meeting.created_at, now);
-  const endedAt = toIso(meeting.ended_at ?? meeting.updated_at, startedAt);
+  const title = meeting.title ?? meeting.meeting_title ?? `Fathom Meeting ${meeting.recording_id}`;
+  // Actual field names from Fathom API (confirmed via debug output)
+  const startedAt = toIso(
+    meeting.recording_start_time ?? meeting.scheduled_start_time ?? meeting.started_at ?? meeting.created_at,
+    now,
+  );
+  const endedAt = toIso(
+    meeting.recording_end_time ?? meeting.scheduled_end_time ?? meeting.ended_at ?? meeting.updated_at,
+    startedAt,
+  );
   const attendees: string[] = (meeting.calendar_invitees ?? [])
     .map((i: any) => i.email)
     .filter(Boolean);
   const transcript = buildTranscript(meeting.transcript);
-  const summary: string | undefined = meeting.summary?.markdown_formatted;
+  // Fathom returns summary as default_summary (may also be summary in webhook)
+  const summary: string | undefined =
+    meeting.default_summary?.markdown_formatted ?? meeting.summary?.markdown_formatted;
+  // Action items use description field (not text)
   const action_items: string[] | undefined = meeting.action_items?.length
     ? meeting.action_items.map((i: any) =>
-        typeof i === 'string' ? i : (i.text ?? String(i)),
+        typeof i === 'string' ? i : (i.description ?? i.text ?? String(i)),
       )
     : undefined;
 
@@ -70,7 +79,7 @@ function buildIngestPayload(meeting: any) {
     ended_at: endedAt,
     attendees,
     transcript,
-    external_id: String(meeting.recording_id ?? meeting.id),
+    external_id: String(meeting.recording_id),
     ...(summary ? { summary } : {}),
     ...(action_items ? { action_items } : {}),
   };
@@ -85,6 +94,7 @@ async function main() {
 
   const args = process.argv.slice(2);
   const doIngest = args.includes('--ingest');
+  const doDebug = args.includes('--debug');
   const idFlag = args.indexOf('--id');
   const targetId = idFlag !== -1 ? parseInt(args[idFlag + 1], 10) : null;
 
@@ -101,7 +111,7 @@ async function main() {
       `/meetings?include_transcript=true&include_summary=true&include_action_items=true`,
       apiKey,
     );
-    meetings = (data.items ?? []).filter((m: any) => m.id === targetId);
+    meetings = (data.items ?? []).filter((m: any) => m.recording_id === targetId);
     if (!meetings.length) {
       console.error(`No meeting found with id=${targetId}`);
       process.exit(1);
@@ -123,6 +133,12 @@ async function main() {
   }
 
   console.log(`\nFound ${meetings.length} meeting(s) in Fathom\n`);
+
+  if (doDebug && meetings.length > 0) {
+    console.log('=== Raw first meeting object (--debug) ===');
+    console.log(JSON.stringify(meetings[0], null, 2));
+    console.log('==========================================\n');
+  }
 
   for (const meeting of meetings) {
     const payload = buildIngestPayload(meeting);

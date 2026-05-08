@@ -11,18 +11,20 @@ const MOCK_INGEST_RESULT = {
 };
 
 const VALID_PAYLOAD = {
-  id: 42,
   recording_id: 7,
   title: 'Team Standup',
-  started_at: '2026-05-01T09:00:00Z',
-  ended_at: '2026-05-01T09:30:00Z',
+  recording_start_time: '2026-05-01T09:00:00Z',
+  recording_end_time: '2026-05-01T09:30:00Z',
   calendar_invitees: [{ email: 'alice@example.com' }, { email: 'bob@example.com' }],
   transcript: [
     { speaker: { display_name: 'Alice' }, text: 'Good morning everyone.', timestamp: '00:00:05' },
     { speaker: { display_name: 'Bob' }, text: 'Hi Alice!', timestamp: '00:00:10' },
   ],
-  summary: { markdown_formatted: '## Summary\nShort standup.' },
-  action_items: ['Alice to update the board', 'Bob to review PR #42'],
+  default_summary: { markdown_formatted: '## Summary\nShort standup.' },
+  action_items: [
+    { description: 'Alice to update the board' },
+    { description: 'Bob to review PR #42' },
+  ],
 };
 
 describe('FathomWebhookController', () => {
@@ -58,6 +60,7 @@ describe('FathomWebhookController', () => {
     expect(arg.title).toBe('Team Standup');
     expect(arg.attendees).toEqual(['alice@example.com', 'bob@example.com']);
     expect(arg.started_at).toBe('2026-05-01T09:00:00.000Z');
+    expect(arg.ended_at).toBe('2026-05-01T09:30:00.000Z');
   });
 
   it('formats transcript lines as "[HH:MM:SS] Speaker: text"', async () => {
@@ -73,10 +76,7 @@ describe('FathomWebhookController', () => {
 
     const arg = mockIngest.mock.calls[0][0];
     expect(arg.summary).toBe('## Summary\nShort standup.');
-    expect(arg.action_items).toEqual([
-      'Alice to update the board',
-      'Bob to review PR #42',
-    ]);
+    expect(arg.action_items).toEqual(['Alice to update the board', 'Bob to review PR #42']);
   });
 
   it('missing transcript → ingest called with "(no transcript)"', async () => {
@@ -87,10 +87,10 @@ describe('FathomWebhookController', () => {
     expect(arg.transcript).toBe('(no transcript)');
   });
 
-  it('action_items as {text} objects → flattened to string array', async () => {
+  it('action_items as {description} objects → flattened to string array', async () => {
     const payload = {
       ...VALID_PAYLOAD,
-      action_items: [{ text: 'Deploy to prod' }, { text: 'Write tests' }],
+      action_items: [{ description: 'Deploy to prod' }, { description: 'Write tests' }],
     };
     await controller.handleWebhook(payload);
 
@@ -98,11 +98,11 @@ describe('FathomWebhookController', () => {
     expect(arg.action_items).toEqual(['Deploy to prod', 'Write tests']);
   });
 
-  it('no started_at → falls back to created_at', async () => {
+  it('no recording_start_time → falls back to scheduled_start_time then created_at', async () => {
     const payload = {
       ...VALID_PAYLOAD,
-      started_at: undefined,
-      created_at: '2026-05-01T08:55:00Z',
+      recording_start_time: undefined,
+      scheduled_start_time: '2026-05-01T08:55:00Z',
     };
     await controller.handleWebhook(payload);
 
@@ -110,24 +110,24 @@ describe('FathomWebhookController', () => {
     expect(arg.started_at).toBe('2026-05-01T08:55:00.000Z');
   });
 
-  it('no title → falls back to meeting_name', async () => {
-    const payload = { ...VALID_PAYLOAD, title: undefined, meeting_name: 'Weekly Sync' };
+  it('no title → falls back to meeting_title', async () => {
+    const payload = { ...VALID_PAYLOAD, title: undefined, meeting_title: 'Weekly Sync' };
     await controller.handleWebhook(payload);
 
     const arg = mockIngest.mock.calls[0][0];
     expect(arg.title).toBe('Weekly Sync');
   });
 
-  it('no title or meeting_name → generates fallback title with id', async () => {
-    const payload = { ...VALID_PAYLOAD, title: undefined, meeting_name: undefined };
+  it('no title or meeting_title → generates fallback title with recording_id', async () => {
+    const payload = { ...VALID_PAYLOAD, title: undefined, meeting_title: undefined };
     await controller.handleWebhook(payload);
 
     const arg = mockIngest.mock.calls[0][0];
-    expect(arg.title).toBe(`Fathom Meeting ${VALID_PAYLOAD.id}`);
+    expect(arg.title).toBe(`Fathom Meeting ${VALID_PAYLOAD.recording_id}`);
   });
 
-  it('invalid payload (missing id) → throws BadRequestException', async () => {
-    const payload = { recording_id: 7, title: 'No ID' };
+  it('invalid payload (missing recording_id) → throws BadRequestException', async () => {
+    const payload = { title: 'No recording_id' };
     await expect(controller.handleWebhook(payload)).rejects.toThrow(BadRequestException);
     expect(mockIngest).not.toHaveBeenCalled();
   });
