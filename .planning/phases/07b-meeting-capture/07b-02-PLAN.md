@@ -68,6 +68,7 @@ must_haves:
     - "Once per day at 9:00 UTC (cron), the daemon POSTs to /api/heartbeat with { host, version, last_ingest_at, queue_depth, last_error }; also pings on boot if the persisted lastHeartbeatAt is more than 24 hours old"
     - "The daemon runs under launchd as a User Agent at ~/Library/LaunchAgents/com.cortex.local.plist with KeepAlive=true, RunAtLoad=true, ThrottleInterval=30, explicit PATH including /usr/local/bin and /opt/homebrew/bin, and logs to ~/Library/Logs/cortex-local.{out,err}.log"
     - "An interactive install.sh prompts for cortex API URL, Meetily/exporter output dir, hostname, and (if not already in Keychain) the shared secret; then templates the plist with absolute paths and launchctl-bootstraps the agent"
+    - "End-to-end SLA (smoke-test asserted): from the moment Meetily writes the markdown file to the moment the corresponding GitHub commit on `nirvana-wiki/main` is observable, no more than 30 seconds elapse. Verified by capturing both timestamps with `stat`/`ls -la` (file write) and `gh api` (commit committer.date) and computing the diff."
   artifacts:
     - path: "cortex-local/package.json"
       provides: "Standalone npm package — type: module; runtime deps chokidar/p-retry/node-cron/gray-matter/zod; dev deps typescript/tsx/vitest/tsup; scripts: dev, build, test, dry-run, start"
@@ -467,7 +468,7 @@ vitest using temp dirs:
 vitest using temp dirs:
 1. `markIngested(filePath)` moves file to `<dir>/_ingested/<basename>` and returns destination path
 2. creates `_ingested/` dir if missing
-3. document overwrite behavior: write a fixture, call markIngested twice on a regenerated source file with same name; assert the second call either overwrites (default `fs.rename` on macOS) OR throws — pick the actual behavior, capture it in the test, and call out the choice in a comment so future readers know it's intentional
+3. **Deterministic overwrite behavior**: asserts that calling `markIngested` twice with the same source basename overwrites the previous file in `_ingested/` (macOS `fs.rename` overwrite semantics — documented Node.js behavior on POSIX systems where `fs.rename` atomically replaces an existing destination). Setup: write fixture A → `markIngested(fixtureA)` → assert at `_ingested/A.md`; write fixture B with the same filename to the watch dir → `markIngested(fixtureB)` → assert `_ingested/A.md` now contains fixture B's contents (overwritten, no error thrown). Add an inline comment in the test: `// Deterministic by spec: macOS fs.rename overwrites destination atomically — see Node.js fs.promises.rename docs and POSIX rename(2). If we ever need to preserve old ingested copies, switch to a content-hashed filename here.`
 
 **Verify so far:**
 ```bash
@@ -478,7 +479,7 @@ Build will not work yet (no `src/index.ts`) — that lands in Task 2. Tests for 
   <verify>
     <automated>cd cortex-local &amp;&amp; npm test 2>&amp;1 | tail -25 &amp;&amp; cd .. &amp;&amp; grep -q "^cortex-local$" .dockerignore</automated>
   </verify>
-  <done>cortex-local subproject scaffolded with own package.json (type: module), tsconfig (Node16 ESM), tsup.config; src/types.ts, src/config.ts, src/queue.ts, src/ingest-marker.ts, src/dry-run.ts created; tests for config + queue + ingest-marker pass; root .dockerignore has `cortex-local` line.</done>
+  <done>cortex-local subproject scaffolded with own package.json (type: module), tsconfig (Node16 ESM), tsup.config; src/types.ts, src/config.ts, src/queue.ts, src/ingest-marker.ts, src/dry-run.ts created; tests for config + queue + ingest-marker pass (including deterministic overwrite assertion); root .dockerignore has `cortex-local` line.</done>
 </task>
 
 <task type="auto">
@@ -907,14 +908,14 @@ Type "approved" once all checks pass, or describe failures so we can adjust befo
   <verify>
     <automated>MISSING — this is a human-verify checkpoint; verification is the &lt;how-to-verify&gt; checklist below, confirmed by user typing "approved"</automated>
   </verify>
-  <done>User has confirmed via "approved": (a) Meetily + meetily-exporter installed on the Mac mini and writing markdown to the watched directory; (b) `bash cortex-local/scripts/install.sh` ran cleanly, secret stored in Keychain, plist bootstrapped; (c) `launchctl print gui/$(id -u)/com.cortex.local` shows the agent running, no crash-loop in `~/Library/Logs/cortex-local.err.log`; (d) `npm run dry-run` against an actual Meetily export produced a valid IngestPayload (no missing frontmatter fields); (e) end-to-end smoke: a captured meeting landed at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{slug}.md` on GitHub within ~30 seconds of Meetily writing the file, with the correct header (Source/Date/Started/Ended/Attendees) and verbatim transcript; (f) Telegram bot DM `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>` arrived; (g) `/vault recent` on Telegram lists the meeting alongside any prior notes; (h) heartbeat staleness alert verified (either by 26h+ daemon downtime or by manually backdating the Heartbeat row's lastSeenAt and triggering the cron worker); (i) MEET-07 invariant audit: confirmed via `fly logs` and Mac-side logs that no audio file extensions appear in any payload, no audio bytes leave the Mac.</done>
+  <done>User has confirmed via "approved": (a) Meetily + meetily-exporter installed on the Mac mini and writing markdown to the watched directory; (b) `bash cortex-local/scripts/install.sh` ran cleanly, secret stored in Keychain, plist bootstrapped; (c) `launchctl print gui/$(id -u)/com.cortex.local` shows the agent running, no crash-loop in `~/Library/Logs/cortex-local.err.log`; (d) `npm run dry-run` against an actual Meetily export produced a valid IngestPayload (no missing frontmatter fields); (e) end-to-end smoke: a captured meeting landed at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{slug}.md` on GitHub with the correct header (Source/Date/Started/Ended/Attendees) and verbatim transcript, AND the measured time-from-file-write to commit-on-main is ≤ 30 seconds (computed from `stat`/`ls -la` and `gh api .../commits/main`); (f) Telegram bot DM `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>` arrived; (g) `/vault recent` on Telegram lists the meeting alongside any prior notes; (h) heartbeat staleness alert verified (either by 26h+ daemon downtime or by manually backdating the Heartbeat row's lastSeenAt and triggering the cron worker); (i) MEET-07 invariant audit: confirmed via `fly logs` and Mac-side logs that no audio file extensions appear in any payload, no audio bytes leave the Mac.</done>
   <what-built>
 - A standalone `cortex-local/` TypeScript daemon: chokidar watcher with 5s file-stable detection, native fetch + p-retry exponential backoff (up to ~1h), persisted JSON queue (`queue.json`) for crash survivability, daily heartbeat via node-cron with on-boot catch-up, persisted `runtime.json` (lastIngestAt + lastError) and `heartbeat.json` (lastHeartbeatAt) state.
 - launchd User Agent plist (KeepAlive, RunAtLoad, ThrottleInterval=30, explicit PATH, log files in `~/Library/Logs/`).
 - Interactive bash install.sh: stores shared secret in macOS Keychain, prompts for cortex URL + Meetily output dir + hostname, renders plist with absolute paths, bootstraps the agent.
 - README + dry-run mode for validating Meetily frontmatter field names before going live.
 
-Server side from plan 07b-01: `POST /api/meetings/ingest` (Zod-validated, SharedSecretGuard with 401 on auth failure), `POST /api/heartbeat`, daily pg-boss cron firing `sendHeartbeatStale` Telegram DMs when last_seen_at > 26h, body parser raised to 5 MB, NotificationService.sendMeetingCaptured implementing the MEET-05 message format.
+Server side from plan 07b-01: `POST /api/meetings/ingest` (Zod-validated, SharedSecretGuard with 401 on auth failure), `POST /api/heartbeat` (with MEET-06 lastError change-detection that fires sendUploadFailed on transition), daily pg-boss cron firing `sendHeartbeatStale` Telegram DMs when last_seen_at > 26h, body parser raised to 5 MB, NotificationService.sendMeetingCaptured implementing the MEET-05 message format.
 
 The whole thing is ready to wire to Meetily; everything except the live meeting capture has been unit-tested. This checkpoint is the only thing that proves the Meetily output contract is what we assume it is — a MEDIUM-confidence item from RESEARCH.md.
   </what-built>
@@ -986,53 +987,75 @@ The whole thing is ready to wire to Meetily; everything except the live meeting 
    ```
    Then `launchctl bootout gui/$(id -u)/com.cortex.local && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.cortex.local.plist` to reload the daemon.
 
-**Live end-to-end smoke:**
+**Live end-to-end smoke (with measured 30-second SLA):**
 
 6. Capture a short (~2 min) test meeting in Meetily — can be a solo Google Meet you join from another device, or just a Meetily test recording.
-7. Wait ~10 seconds after Meetily writes the markdown file. Within ~30 seconds total:
-   - Visit https://github.com/hindole/nirvana-wiki/tree/main/raw/meetings — confirm the file appears at `YYYY-MM-DD-{title-slug}.md` with the correct header (Source: Meetily (Google Meet) / Date / Started / Ended / Attendees) and verbatim transcript body.
-   - Telegram bot DM arrives: `📝 Meeting captured: "<title>" (<duration>, <N> attendees) → raw/meetings/...`
-   - The source file in `~/Documents/Meetily/exports/` has been moved to `~/Documents/Meetily/exports/_ingested/`.
+
+7. **Measure the SLA explicitly (do not eyeball)**:
+   - **Step A — Capture the file-write timestamp on the Mac mini.** As soon as Meetily/meetily-exporter has written the markdown file, run:
+     ```bash
+     # Replace <FILE> with the actual path under ~/Documents/Meetily/exports/
+     ls -la <FILE>
+     stat -f "%Sm  (%m epoch)" -t "%Y-%m-%dT%H:%M:%SZ" <FILE>   # ISO + epoch
+     ```
+     Record the modification time (e.g. `2026-04-26T18:42:11Z`).
+   - **Step B — Capture the GitHub commit timestamp.** After ~30 seconds (give the daemon time to detect, wait the 5s stability window, POST, and let cortex commit + push), run:
+     ```bash
+     gh api repos/<your-user>/nirvana-wiki/commits/main --jq '.commit.committer.date'
+     ```
+     This returns an ISO 8601 timestamp like `2026-04-26T18:42:36Z`.
+   - **Step C — Compute the diff.** Subtract Step A from Step B:
+     - **PASS:** delta ≤ 30 seconds → record the actual delta in the SUMMARY (e.g. "measured: 25s file-write → commit").
+     - **FAIL:** delta > 30 seconds → STOP. Document the breakdown (chokidar detect time, server commit time, push time) in the SUMMARY and treat as an open regression for Phase 7b. Common causes: chokidar's `awaitWriteFinish` 5s + slow push to GitHub; server queue contention; large transcript over slow uplink. If the delta is consistently >30s for normal-sized transcripts (50-200KB), open a follow-up plan to revisit `awaitWriteFinish` timing or the vault-write batching.
+   - **Also verify** during this window:
+     - File appears at https://github.com/<your-user>/nirvana-wiki/tree/main/raw/meetings as `YYYY-MM-DD-{title-slug}.md` with correct header (Source: Meetily (Google Meet) / Date / Started / Ended / Attendees) and verbatim transcript body.
+     - Telegram bot DM arrives: `📝 Meeting captured: "<title>" (<duration>, <N> attendees) → raw/meetings/...`
+     - The source file in `~/Documents/Meetily/exports/` has been moved to `~/Documents/Meetily/exports/_ingested/`.
+
 8. From Telegram: send `/vault recent`. The new meeting should appear at the top with ✅, alongside any prior notes from Phase 7a. (This is VAULT-06 — already polymorphic in 7a, observably satisfied here.)
 
 **Failure-mode smoke (one-shot proofs):**
 
 9. **Auth failure**: temporarily corrupt the secret in `~/Library/Application Support/cortex-local/config.json` (change one character), `launchctl bootout` + `bootstrap` to reload, capture a meeting. Expected: log shows `[upload] terminal failure: auth failed (401)`; runtime.json has `lastError` populated; restore the correct secret and reload before continuing.
-10. **Idempotency**: move one file from `_ingested/` back to the watch dir. Expected: cortex returns 200 with the existing `meeting_id` (no duplicate vault commit); log shows the duplicate-ingest log line on the cortex side (`Duplicate ingest external_id=...`).
-11. **Heartbeat staleness alert**: either (preferred for time) connect to the cortex Postgres and `UPDATE heartbeats SET last_seen_at = NOW() - INTERVAL '30 hours' WHERE host = 'mac-mini-home';`, then manually trigger the staleness check via `psql` or wait for the next 9 UTC cron tick. Expected: Telegram DM `⚠️ cortex-local silent — mac-mini-home hasn't checked in for 30 hours`.
+
+10. **MEET-06 escalation chain (server-side surfacing of daemon's lastError)**: While the daemon still has the corrupted secret from step 9, wait for it to attempt one heartbeat (or manually trigger one by `launchctl bootout` + `bootstrap`). Expected: cortex receives a heartbeat with `last_error` populated; HeartbeatService.upsert detects the null→string transition; Telegram DM arrives: `⚠ cortex-local upload failed — Host: mac-mini-home, Last error: auth failed (401) ... Meeting capture is paused. Investigate the daemon log on the Mac mini.` Restore the secret, restart the daemon, capture a successful meeting; on the NEXT heartbeat, runtime.json's lastError is null → cortex stores null → no further DM (single-fire on transition, not on every healthy ping).
+
+11. **Idempotency**: move one file from `_ingested/` back to the watch dir. Expected: cortex returns 200 with the existing `meeting_id` (no duplicate vault commit); log shows the duplicate-ingest log line on the cortex side (`Duplicate ingest external_id=...`).
+
+12. **Heartbeat staleness alert**: either (preferred for time) connect to the cortex Postgres and `UPDATE heartbeats SET last_seen_at = NOW() - INTERVAL '30 hours' WHERE host = 'mac-mini-home';`, then manually trigger the staleness check via `psql` or wait for the next 9 UTC cron tick. Expected: Telegram DM `⚠️ cortex-local silent — mac-mini-home hasn't checked in for 30 hours`.
 
 **Confirm or report:**
 
-Type `approved` once steps 4–11 succeed. If any step fails, capture the relevant logs (`fly logs -a cortex-hindole`, `~/Library/Logs/cortex-local.err.log`, `~/Library/Logs/cortex-local.out.log`) and describe the failure so we can fix before declaring Phase 7b complete.
+Type `approved` once steps 4–12 succeed. If any step fails, capture the relevant logs (`fly logs -a cortex-hindole`, `~/Library/Logs/cortex-local.err.log`, `~/Library/Logs/cortex-local.out.log`) and describe the failure so we can fix before declaring Phase 7b complete. Specifically include the measured SLA delta from step 7 in the SUMMARY.
   </how-to-verify>
-  <resume-signal>Type "approved" once the live meeting end-to-end smoke succeeds, or describe failures.</resume-signal>
+  <resume-signal>Type "approved" once the live meeting end-to-end smoke succeeds (with measured SLA ≤ 30s) and the MEET-06 escalation DM is verified, or describe failures.</resume-signal>
 </task>
 
 </tasks>
 
 <verification>
 - `cd cortex-local && npm run build` produces `dist/index.js` with zero TypeScript errors.
-- `cd cortex-local && npm test` passes for: config (env/path validation, schema validation, defaults), queue (atomic write, dedupe, drain), ingest-marker (atomic mv to `_ingested/`), watcher (buildPayload extraction, MEET-07 extension filter, processFile order), client (401/400 abort, retry on 5xx, runtime state writes), heartbeat (catch-up on boot, daily cron with UTC timezone).
+- `cd cortex-local && npm test` passes for: config (env/path validation, schema validation, defaults), queue (atomic write, dedupe, drain), ingest-marker (atomic mv to `_ingested/`, deterministic overwrite), watcher (buildPayload extraction, MEET-07 extension filter, processFile order), client (401/400 abort, retry on 5xx, runtime state writes), heartbeat (catch-up on boot, daily cron with UTC timezone).
 - `cortex-local/scripts/install.sh` and `uninstall.sh` are executable; both pass `sh -n` syntax check.
 - `cortex-local/scripts/com.cortex.local.plist.tmpl` exists with required keys (Label, ProgramArguments, KeepAlive=true, RunAtLoad=true, ThrottleInterval=30, EnvironmentVariables.PATH, log paths).
 - Root `.dockerignore` has `cortex-local` line so the Fly image excludes the daemon.
 - VaultService is NOT modified (plan reuses it via the server-side endpoints from 07b-01).
-- Human checkpoint (Task 3): Meetily + meetily-exporter installed, install.sh ran, dry-run validated frontmatter field names, live meeting captured end-to-end (vault file + Telegram notification + `/vault recent` shows it), heartbeat staleness alert verified.
+- Human checkpoint (Task 3): Meetily + meetily-exporter installed, install.sh ran, dry-run validated frontmatter field names, live meeting captured end-to-end with measured ≤30s SLA from `stat` to `gh api commits/main`, MEET-06 escalation DM verified, heartbeat staleness alert verified.
 </verification>
 
 <success_criteria>
 - MEET-01 (cortex-local under launchd watching Meetily output): User Agent plist at `~/Library/LaunchAgents/com.cortex.local.plist`, KeepAlive + RunAtLoad + ThrottleInterval=30, watching `meetilyOutputDir` from config ✅
 - MEET-02 (5s file stability + POST): chokidar.watch with `awaitWriteFinish: { stabilityThreshold: 5000, pollInterval: 200 }`; on `add` parse + POST to `/api/meetings/ingest` ✅
-- MEET-06 (exponential backoff up to 1h, then notify): p-retry retries=5, factor=2, minTimeout=60s, maxTimeout=30m; on terminal failure persist `lastError` so the next heartbeat surfaces it via cortex's staleness DM ✅
+- MEET-06 (exponential backoff up to 1h, then notify): p-retry retries=5, factor=2, minTimeout=60s, maxTimeout=30m; on terminal failure persist `lastError` so the next heartbeat surfaces it via cortex's HeartbeatService.upsert lastError-transition detector → sendUploadFailed Telegram DM ✅
 - MEET-07 (audio never leaves Mac, daemon side): `.md` extension hard-filter at the top of `processFile`; dry-run shows no audio fields in payload; payload schema accepts only text fields ✅
 - MEET-09 (daemon side — daily heartbeat + boot catch-up): node-cron `0 9 * * *` UTC; persisted `lastHeartbeatAt`; if missing or >24h stale on boot, fire one ping immediately ✅
 - Crash survivability: `queue.json` (pending uploads) and `runtime.json` (lastIngestAt + lastError) and `heartbeat.json` (lastHeartbeatAt) all atomic-written; daemon drains queue on boot before listening ✅
 - Phase 7b end-to-end success criteria from ROADMAP.md (all 8) verified by checkpoint:
-  - SC-1: transcript at `raw/meetings/YYYY-MM-DD-{title-slug}.md` within 30s ✅
+  - SC-1: transcript at `raw/meetings/YYYY-MM-DD-{title-slug}.md` within measured ≤30s (asserted via `stat` + `gh api`) ✅
   - SC-2: verbatim transcript + correct header ✅
   - SC-3: Telegram notification with title/duration/N attendees/path ✅
   - SC-4: audio never leaves Mac ✅
-  - SC-5: 1h retry + Telegram alert on terminal failure ✅
+  - SC-5: 1h retry + Telegram alert on terminal failure (via MEET-06 escalation chain) ✅
   - SC-6: `/vault recent` lists meetings + notes ✅
   - SC-7: workspace=Work always ✅ (asserted server-side in 07b-01 tests)
   - SC-8: daily heartbeat + 26h staleness Telegram alert ✅
@@ -1046,12 +1069,10 @@ After completion, create `.planning/phases/07b-meeting-capture/07b-02-SUMMARY.md
 - Crash-survivability triad: queue.json (pending uploads) + runtime.json (lastIngestAt + lastError) + heartbeat.json (lastHeartbeatAt) — all atomic-written; drain on boot
 - Frontmatter-field-name flexibility (RESEARCH.md Open Question 1) — config block allows the user to map cortex-local's expected keys to whatever meetily-exporter (or whatever adapter they ended up with) produces
 - Dry-run mode: validates the Meetily contract against actual user output before going live
-- 401/400 → AbortError; 5xx/network → retry; on terminal failure surface via heartbeat lastError field (daemon has no Telegram token of its own)
+- 401/400 → AbortError; 5xx/network → retry; on terminal failure surface via heartbeat lastError field (daemon has no Telegram token of its own); cortex's MEET-06 escalation chain (HeartbeatService.upsert lastError-transition detector → sendUploadFailed) closes the loop
 - launchctl bootstrap (modern) with load -w fallback (legacy)
 - Root .dockerignore updated so Fly image excludes the daemon
-- Smoke-test outcomes from the human checkpoint (Meetily install path, exact frontmatter field names that worked, any field-name overrides applied, end-to-end timing from Meetily-write to vault-commit + Telegram notification)
+- Smoke-test outcomes from the human checkpoint (Meetily install path, exact frontmatter field names that worked, any field-name overrides applied, **measured SLA delta from file-write to GitHub commit**, MEET-06 escalation DM verification result)
 - Deviations from RESEARCH.md and rationale
 - Phase 7b traceability: every requirement (MEET-01..09 + VAULT-06) → which plan / which artifact
 </output>
-</content>
-</invoke>

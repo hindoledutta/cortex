@@ -83,12 +83,12 @@ export class VaultService implements OnModuleInit {
     if (needsClone) {
       this.logger.log(`Bootstrapping clone to ${this.vaultDir}`);
       await fs.mkdir(path.dirname(this.vaultDir), { recursive: true });
-      await simpleGit()
+      await simpleGit({ unsafe: { allowUnsafeSshCommand: true } })
         .env('GIT_SSH_COMMAND', sshCommand)
         .clone(repoUrl, this.vaultDir);
     }
 
-    this.git = simpleGit(this.vaultDir).env(
+    this.git = simpleGit(this.vaultDir, { unsafe: { allowUnsafeSshCommand: true } }).env(
       'GIT_SSH_COMMAND',
       sshCommand,
     );

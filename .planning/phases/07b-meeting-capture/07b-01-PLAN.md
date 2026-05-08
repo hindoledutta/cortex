@@ -25,6 +25,7 @@ files_modified:
   - src/heartbeat/heartbeat-staleness.service.ts
   - src/heartbeat/heartbeat-staleness.service.spec.ts
   - src/scheduler/notification.service.ts
+  - src/scheduler/notification.service.spec.ts
   - src/scheduler/scheduler.module.ts
   - src/app.module.ts
   - .env.example
@@ -33,6 +34,7 @@ requirements:
   - MEET-03
   - MEET-04
   - MEET-05
+  - MEET-06
   - MEET-07
   - MEET-08
   - MEET-09
@@ -54,6 +56,7 @@ must_haves:
     - "After successful ingest, the bot DMs the owner: `Meeting captured: \"<title>\" (<duration>, <N> attendees) → <vault path>` with duration formatted as \"47 min\" if <60 or \"1h 12m\" if ≥60"
     - "POST /api/heartbeat upserts a Heartbeat row keyed by host with last_seen_at = now()"
     - "Once per day at Settings.notificationHourUtc, a pg-boss-scheduled job DMs the owner if any Heartbeat.last_seen_at is older than 26 hours"
+    - "MEET-06 escalation chain (server side): when the daemon reports a non-null `last_error` for the first time (or with a value different from the previously stored `lastError`), HeartbeatService.upsert fires NotificationService.sendUploadFailed exactly once — fire-and-forget, must not fail the heartbeat upsert. Repeated heartbeats with the same `last_error` string do NOT re-notify (de-dupe by string equality)."
     - "Express body parser accepts JSON payloads up to 5 MB (so 1h transcripts ~50-200KB do not 413)"
     - "/vault recent on Telegram returns the meeting alongside any prior notes (already polymorphic via VaultWrite kind from 7a — confirmed by integration test)"
   artifacts:
@@ -75,12 +78,23 @@ must_haves:
     - path: "src/heartbeat/heartbeat.controller.ts"
       provides: "POST /api/heartbeat behind @UseGuards(SharedSecretGuard); upserts Heartbeat row"
       contains: "@Post()"
+    - path: "src/heartbeat/heartbeat.service.ts"
+      provides: "upsert() reads existing row, computes lastError change (was null/different → now non-null and changed), fires NotificationService.sendUploadFailed fire-and-forget on transition. findStale(cutoff) returns rows with lastSeenAt < cutoff."
+      min_lines: 60
+      contains: "sendUploadFailed"
     - path: "src/heartbeat/heartbeat-staleness.service.ts"
       provides: "OnModuleInit registers pg-boss daily cron at Settings.notificationHourUtc; queries stale heartbeats (>26h) and DMs owner via NotificationService.sendHeartbeatStale"
       min_lines: 40
     - path: "src/scheduler/notification.service.ts"
-      provides: "sendMeetingCaptured() + sendHeartbeatStale() — extends existing service"
-      contains: "sendMeetingCaptured"
+      provides: "sendMeetingCaptured() + sendHeartbeatStale() + sendUploadFailed() — extends existing service. sendUploadFailed is the MEET-06 server-side escalation channel: HTML-formatted Telegram DM with host + escapeHtml(error)."
+      contains: "sendUploadFailed"
+    - path: "src/scheduler/notification.service.spec.ts"
+      provides: "Unit tests for sendMeetingCaptured, sendHeartbeatStale, sendUploadFailed (HTML escape, ownerChatId, parse_mode), and the formatDuration static helper. Mocks the Telegraf bot."
+      min_lines: 40
+    - path: "src/heartbeat/heartbeat.service.spec.ts"
+      provides: "Tests for upsert (fresh insert, update without change, lastError-transition triggers sendUploadFailed exactly once, repeated same-error does NOT re-notify, sendUploadFailed rejection does NOT fail the upsert) + findStale shape."
+      min_lines: 50
+      contains: "sendUploadFailed"
     - path: "src/main.ts"
       provides: "app.use(json({ limit: '5mb' })) so 1h transcripts do not 413"
       contains: "limit: '5mb'"
@@ -105,6 +119,10 @@ must_haves:
       to: "src/workspace/workspace.service.ts"
       via: "this.workspace.findByName('work') — locked default per MEET-08"
       pattern: "findByName\\(['\"]work['\"]\\)"
+    - from: "src/heartbeat/heartbeat.service.ts"
+      to: "src/scheduler/notification.service.ts"
+      via: "MEET-06 escalation: when incoming payload.last_error is non-null AND differs from existing row's lastError (including null→string), call this.notifications.sendUploadFailed({ host, error }).catch(log) — fire-and-forget, must not fail the upsert"
+      pattern: "sendUploadFailed"
     - from: "src/heartbeat/heartbeat-staleness.service.ts"
       to: "src/scheduler/scheduler.service.ts"
       via: "this.scheduler.boss.schedule('heartbeat-staleness-check', cron) at OnModuleInit"
@@ -120,19 +138,19 @@ must_haves:
 ---
 
 <objective>
-Build the cortex-side server surface for meeting capture: schema + bearer-token-authenticated `POST /api/meetings/ingest` that writes verbatim transcripts to `raw/meetings/` via the Phase 7a VaultService, plus `POST /api/heartbeat` and a daily pg-boss cron that DMs the owner when the cortex-local watcher goes silent for >26h. Also raise the Express JSON body limit to 5 MB so a 1h transcript does not 413, extend NotificationService with two new message types, and verify (via integration test) that VAULT-06's `/vault recent` already polymorphically lists meeting writes (no new code needed there — Phase 7a built it polymorphic).
+Build the cortex-side server surface for meeting capture: schema + bearer-token-authenticated `POST /api/meetings/ingest` that writes verbatim transcripts to `raw/meetings/` via the Phase 7a VaultService, plus `POST /api/heartbeat` and a daily pg-boss cron that DMs the owner when the cortex-local watcher goes silent for >26h. Also raise the Express JSON body limit to 5 MB so a 1h transcript does not 413, extend NotificationService with three new message types (`sendMeetingCaptured`, `sendHeartbeatStale`, `sendUploadFailed`), wire MEET-06's server-side escalation chain (HeartbeatService detects when the daemon reports a fresh `last_error` and DMs the owner via `sendUploadFailed`), and verify (via integration test) that VAULT-06's `/vault recent` already polymorphically lists meeting writes (no new code needed there — Phase 7a built it polymorphic).
 
-Purpose: Plan 07b-02 (the cortex-local daemon on the Mac mini) cannot ship without the receiving end. This plan delivers every server-side requirement (MEET-03, MEET-04, MEET-05, MEET-08, server side of MEET-07 + MEET-09, VAULT-06) so the daemon plan is pure client work.
+Purpose: Plan 07b-02 (the cortex-local daemon on the Mac mini) cannot ship without the receiving end. This plan delivers every server-side requirement (MEET-03, MEET-04, MEET-05, MEET-06 server-side escalation, MEET-08, server side of MEET-07 + MEET-09, VAULT-06) so the daemon plan is pure client work.
 
 Output:
 - Two new Prisma models (Meeting, Heartbeat) + MeetingSource enum + migration
 - New `src/auth/` containing `SharedSecretGuard` (constant-time compare via `node:crypto.timingSafeEqual`, throws `UnauthorizedException` — NOT silent drop)
 - New `src/meetings/` module: controller (`@UseGuards(SharedSecretGuard)`), service (`slug` lib for title slug, no LLM), Zod payload schema
-- New `src/heartbeat/` module: controller, upsert service, daily-staleness pg-boss cron registered at `Settings.notificationHourUtc`
-- Extended `NotificationService` with `sendMeetingCaptured()` and `sendHeartbeatStale()`
+- New `src/heartbeat/` module: controller, upsert service with MEET-06 lastError change-detection, daily-staleness pg-boss cron registered at `Settings.notificationHourUtc`
+- Extended `NotificationService` with `sendMeetingCaptured()`, `sendHeartbeatStale()`, and `sendUploadFailed()` (MEET-06 escalation channel)
 - `src/main.ts` raised to `5mb` JSON body limit
 - `.env.example` documents `CORTEX_LOCAL_SHARED_SECRET`
-- Tests: SharedSecretGuard (401 on missing/wrong/length-mismatch tokens; 200 on valid), MeetingsService (slug + workspace=Work + vault.writeFile shape + duplicate external_id idempotency), HeartbeatStalenessService (queries stale rows, fires notification per host), formatDuration helper
+- Tests: SharedSecretGuard (401 on missing/wrong/length-mismatch tokens; 200 on valid), MeetingsService (slug + workspace=Work + vault.writeFile shape + duplicate external_id idempotency), HeartbeatService (lastError-transition detection: fires sendUploadFailed once on null→string transition, does NOT re-notify on repeated same-error), HeartbeatStalenessService (queries stale rows, fires notification per host), formatDuration helper
 </objective>
 
 <execution_context>
@@ -216,6 +234,7 @@ export class NotificationService {
   // NEW (this plan):
   async sendMeetingCaptured(input: { title; startedAt; endedAt; attendeeCount; vaultPath }): Promise<void>;
   async sendHeartbeatStale(input: { host; hoursAgo; lastError? }): Promise<void>;
+  async sendUploadFailed(input: { host; error }): Promise<void>;   // MEET-06 escalation
   private escapeHtml(text: string): string;  // already exists — reuse
 }
 ```
@@ -432,8 +451,8 @@ CORTEX_LOCAL_SHARED_SECRET=
 </task>
 
 <task type="auto">
-  <name>Task 2: Build SharedSecretGuard + MeetingsModule (controller, service, types) + extend NotificationService.sendMeetingCaptured</name>
-  <files>src/auth/shared-secret.guard.ts, src/auth/shared-secret.guard.spec.ts, src/meetings/meetings.module.ts, src/meetings/meetings.controller.ts, src/meetings/meetings.controller.spec.ts, src/meetings/meetings.service.ts, src/meetings/meetings.service.spec.ts, src/meetings/meetings.types.ts, src/scheduler/notification.service.ts, src/app.module.ts</files>
+  <name>Task 2: Build SharedSecretGuard + MeetingsModule (controller, service, types) + extend NotificationService with sendMeetingCaptured + sendHeartbeatStale + sendUploadFailed (+ spec)</name>
+  <files>src/auth/shared-secret.guard.ts, src/auth/shared-secret.guard.spec.ts, src/meetings/meetings.module.ts, src/meetings/meetings.controller.ts, src/meetings/meetings.controller.spec.ts, src/meetings/meetings.service.ts, src/meetings/meetings.service.spec.ts, src/meetings/meetings.types.ts, src/scheduler/notification.service.ts, src/scheduler/notification.service.spec.ts, src/app.module.ts</files>
   <action>
 **Create `src/auth/shared-secret.guard.ts`:**
 
@@ -699,14 +718,14 @@ export class MeetingsModule {}
 
 **Extend `src/scheduler/notification.service.ts`:**
 
-Add two new methods + a small `formatDuration` helper. Keep escapeHtml usage consistent. The HTML format matches existing patterns (`<b>`, `<code>`).
+Add THREE new methods + a small `formatDuration` helper. Keep escapeHtml usage consistent. The HTML format matches existing patterns (`<b>`, `<code>`).
 
 ```typescript
 // Add near the bottom of the class, before the private escapeHtml() method:
 
 /**
  * Notify owner that a meeting has been captured to the vault.
- * Format per HLD §3.8 B-MEET-5 + RESEARCH.md MEET-05: 
+ * Format per HLD §3.8 B-MEET-5 + RESEARCH.md MEET-05:
  *   `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
  * No interactive buttons — informational.
  */
@@ -752,6 +771,36 @@ async sendHeartbeatStale(input: {
   this.logger.log(`Heartbeat-stale notification sent: host=${input.host} hoursAgo=${input.hoursAgo}`);
 }
 
+/**
+ * MEET-06 server-side escalation channel. Fired by HeartbeatService.upsert when the daemon
+ * reports a fresh `last_error` (transition from null/different value → new non-null value).
+ * The daemon itself has NO Telegram bot token; it surfaces failures through this field
+ * (RESEARCH.md MEET-06: "the daemon's only escalation channel is the `last_error` field on its heartbeat ping").
+ *
+ * Format (HTML, parse_mode: HTML):
+ *   ⚠ <b>cortex-local upload failed</b>
+ *
+ *   Host: <code>{host}</code>
+ *   Last error: <code>{escapeHtml(error)}</code>
+ *
+ *   Meeting capture is paused. Investigate the daemon log on the Mac mini.
+ */
+async sendUploadFailed(input: {
+  host: string;
+  error: string;
+}): Promise<void> {
+  const text = [
+    `⚠ <b>cortex-local upload failed</b>`,
+    ``,
+    `Host: <code>${this.escapeHtml(input.host)}</code>`,
+    `Last error: <code>${this.escapeHtml(input.error.slice(0, 500))}</code>`,
+    ``,
+    `Meeting capture is paused. Investigate the daemon log on the Mac mini.`,
+  ].join('\n');
+  await this.bot.telegram.sendMessage(this.ownerChatId, text, { parse_mode: 'HTML' });
+  this.logger.log(`Upload-failed notification sent: host=${input.host} error="${input.error.slice(0, 80)}"`);
+}
+
 /** "47 min" if <60, "1h 12m" if ≥60. Public-static for unit testing. */
 static formatDuration(startedAt: Date, endedAt: Date): string {
   const totalMinutes = Math.max(0, Math.round((endedAt.getTime() - startedAt.getTime()) / 60_000));
@@ -761,6 +810,19 @@ static formatDuration(startedAt: Date, endedAt: Date): string {
   return `${hours}h ${minutes}m`;
 }
 ```
+
+**Create `src/scheduler/notification.service.spec.ts`:**
+
+vitest. Mock `@InjectBot()` Telegraf instance with `{ telegram: { sendMessage: vi.fn() } }` and `ConfigService` with `getOrThrow('OWNER_CHAT_ID') -> '123456'`. Tests:
+
+1. `sendMeetingCaptured`: calls `bot.telegram.sendMessage` once with `(123456, <text containing "📝 Meeting captured" and the HTML-escaped title and the vault path inside <code>...</code>), { parse_mode: 'HTML' })`; duration is "47 min" for 47-minute window.
+2. `sendMeetingCaptured`: HTML-escapes the title (e.g. title `<b>Bad</b>` becomes `&lt;b&gt;Bad&lt;/b&gt;` in the sent text).
+3. `sendMeetingCaptured`: 1 attendee renders "1 attendee"; 3 attendees renders "3 attendees".
+4. `sendHeartbeatStale`: calls sendMessage with text containing the host (HTML-escaped) and the hoursAgo number; if `lastError` present, includes "Last reported error:" line; if `lastError` is null/undefined/empty, no error line is appended.
+5. `sendUploadFailed`: calls sendMessage exactly once with `parse_mode: 'HTML'`; text contains `⚠ <b>cortex-local upload failed</b>`, the HTML-escaped host inside `<code>`, the HTML-escaped error inside `<code>`, and the trailing "Meeting capture is paused" line.
+6. `sendUploadFailed`: long error strings (>500 chars) are truncated to 500 chars before HTML-escape.
+7. `sendUploadFailed`: error containing HTML-injection like `<script>alert(1)</script>` is rendered as `&lt;script&gt;alert(1)&lt;/script&gt;` (escapeHtml correctness; defense-in-depth even though Telegram strips most HTML).
+8. `formatDuration`: 47 min input → "47 min"; 60 min → "1h 0m"; 72 min → "1h 12m"; 1 min → "1 min"; 0 min (start==end) → "0 min"; negative duration (end before start) → "0 min" (Math.max).
 
 **Create `src/meetings/meetings.controller.spec.ts`:**
 
@@ -782,7 +844,6 @@ Vitest tests with mocked PrismaService, VaultService, WorkspaceService, Notifica
 4. Slug correctness: title `"Q2 2026 Roadmap Review!"` → slug `"q2-2026-roadmap-review"` (slug lib lowercases + replaces spaces + strips punctuation); long titles capped at 80 chars; empty/all-punctuation title falls back to `"untitled-meeting"`.
 5. Idempotency (RESEARCH.md Pitfall 8): if `prisma.meeting.findFirst` returns existing for `(source: 'meetily', externalId: '<id>')`, vault.writeFile is NEVER called and the existing record is returned.
 6. Notification fire-and-forget (RESEARCH.md Pitfall 9): when `notifications.sendMeetingCaptured` rejects, `meetings.service.ingest` STILL resolves successfully and the Meeting row is still created.
-7. `formatDuration(start, end)` helper: 47 min → "47 min"; 72 min → "1h 12m"; 60 min → "1h 0m"; 1 min → "1 min".
 
 **Wire into `src/app.module.ts`:**
 
@@ -791,13 +852,15 @@ Add `import { MeetingsModule } from './meetings/meetings.module';` and add `Meet
   <verify>
     <automated>npm test -- src/auth src/meetings src/scheduler/notification.service 2>&amp;1 | tail -30 &amp;&amp; npm run build 2>&amp;1 | tail -10 &amp;&amp; grep -q "MeetingsModule" src/app.module.ts</automated>
   </verify>
-  <done>SharedSecretGuard tests pass (constructor validation; throws on missing/wrong/length-mismatch tokens; allows valid); MeetingsService tests pass (slug correctness, workspace=Work always, body format, idempotency on external_id, notification fire-and-forget); MeetingsController tests pass (Zod validation + delegation); NotificationService.formatDuration tests pass; `npm run build` succeeds with zero type errors; AppModule imports MeetingsModule.</done>
+  <done>SharedSecretGuard tests pass (constructor validation; throws on missing/wrong/length-mismatch tokens; allows valid); MeetingsService tests pass (slug correctness, workspace=Work always, body format, idempotency on external_id, notification fire-and-forget); MeetingsController tests pass (Zod validation + delegation); NotificationService tests pass (sendMeetingCaptured + sendHeartbeatStale + sendUploadFailed HTML format + escape; formatDuration covers all branches); `npm run build` succeeds with zero type errors; AppModule imports MeetingsModule.</done>
 </task>
 
 <task type="auto">
-  <name>Task 3: Build HeartbeatModule (controller, service, types) + HeartbeatStalenessService daily cron + wire AppModule + verify VAULT-06 polymorphism</name>
-  <files>src/heartbeat/heartbeat.module.ts, src/heartbeat/heartbeat.controller.ts, src/heartbeat/heartbeat.controller.spec.ts, src/heartbeat/heartbeat.service.ts, src/heartbeat/heartbeat.service.spec.ts, src/heartbeat/heartbeat.types.ts, src/heartbeat/heartbeat-staleness.service.ts, src/heartbeat/heartbeat-staleness.service.spec.ts, src/app.module.ts</files>
+  <name>Task 3: Build HeartbeatModule (controller, service basic upsert, types) + HeartbeatStalenessService daily cron + wire AppModule + verify VAULT-06 polymorphism</name>
+  <files>src/heartbeat/heartbeat.module.ts, src/heartbeat/heartbeat.controller.ts, src/heartbeat/heartbeat.controller.spec.ts, src/heartbeat/heartbeat.service.ts, src/heartbeat/heartbeat.types.ts, src/heartbeat/heartbeat-staleness.service.ts, src/heartbeat/heartbeat-staleness.service.spec.ts, src/app.module.ts</files>
   <action>
+**Note:** This task creates the basic HeartbeatService.upsert (lastSeenAt + optional fields). Task 4 EXTENDS that same upsert with the MEET-06 lastError change-detection + sendUploadFailed escalation. Keeping them split because escalation is a logically distinct concern (it crosses module boundaries: HeartbeatService → NotificationService) and warrants its own dedicated test surface. The two tasks share the heartbeat.service.ts file — Task 4 must run AFTER Task 3 (sequential within plan; both still wave 1).
+
 **Create `src/heartbeat/heartbeat.types.ts`:**
 
 ```typescript
@@ -834,6 +897,10 @@ export class HeartbeatService {
   /**
    * Upsert a heartbeat keyed by host. Always sets lastSeenAt = now().
    * Optional fields (version, lastIngestAt, queueDepth, lastError) overwrite if present.
+   *
+   * NOTE: Task 4 of this plan EXTENDS this method with MEET-06 lastError change-detection
+   * + NotificationService.sendUploadFailed fire-and-forget. Do not duplicate that work here —
+   * just implement the basic upsert so HeartbeatStalenessService and the controller wire up.
    */
   async upsert(p: HeartbeatPayload): Promise<{ host: string; lastSeenAt: Date }> {
     const now = new Date();
@@ -973,13 +1040,6 @@ import { SharedSecretGuard } from '../auth/shared-secret.guard';
 export class HeartbeatModule {}
 ```
 
-**Create `src/heartbeat/heartbeat.service.spec.ts`:**
-
-Mocked PrismaService (`upsert`, `findMany`).
-1. `upsert` calls `prisma.heartbeat.upsert` with `{ where: { host }, create: { ...data, lastSeenAt: <now> }, update: { ...data, lastSeenAt: <now> } }`.
-2. `upsert` writes optional fields when provided, null when omitted.
-3. `findStale(cutoff)` calls `prisma.heartbeat.findMany({ where: { lastSeenAt: { lt: cutoff } } })`.
-
 **Create `src/heartbeat/heartbeat.controller.spec.ts`:**
 
 Mocked HeartbeatService.
@@ -1004,21 +1064,147 @@ Add `import { HeartbeatModule } from './heartbeat/heartbeat.module';` and append
 
 Phase 7a's plan 07a-02 task 2 implemented `formatVaultRecent(rows)` and `handleVaultRecentCommand` querying `prisma.vaultWrite.findMany({ orderBy: { createdAt: 'desc' }, take: 10 })`. The formatter prints `vaultPath` for each row regardless of `kind` (`note` vs `meeting`) — polymorphic by construction. VAULT-06 is observably satisfied as soon as a Meeting write inserts a VaultWrite row (which Phase 7a's VaultService already does in its try/finally for any kind, including `'meeting'`).
 
-Add a small verification test at `src/meetings/meetings.service.spec.ts` (append to the existing spec from Task 2):
-
-```typescript
-it('VAULT-06: VaultService.writeFile is called with kind=meeting so the audit row is polymorphic', async () => {
-  // Already covered by happy-path test 1 — assertion is on the kind field of the writeFile call.
-  // This documents the link explicitly so future readers find the contract.
-});
-```
-
-(No actual end-to-end VAULT-06 test is feasible at unit-test layer because it spans VaultService + DB + the `/vault recent` Telegram handler. The real VAULT-06 verification happens in plan 07b-02's smoke test, which captures one meeting and runs `/vault recent` from the bot. Document this explicitly in the SUMMARY.)
+The MeetingsService spec in Task 2 already asserts `vault.writeFile` is called with `kind: 'meeting'` — that's the contract that makes VAULT-06 polymorphic. Document this explicitly in the SUMMARY: real end-to-end VAULT-06 verification happens in plan 07b-02's smoke test, which captures one meeting and runs `/vault recent` from the bot.
   </action>
   <verify>
     <automated>npm test -- src/heartbeat src/meetings 2>&amp;1 | tail -30 &amp;&amp; npm run build 2>&amp;1 | tail -10 &amp;&amp; grep -q "HeartbeatModule" src/app.module.ts</automated>
   </verify>
-  <done>HeartbeatService tests pass (upsert + findStale shape); HeartbeatController tests pass (Zod validation, success response shape); HeartbeatStalenessService tests pass (cron registration with notificationHourUtc; no-op on no-stale; notification per stale host; loop continues on per-host notification failure); `npm run build` succeeds; AppModule imports HeartbeatModule; VAULT-06 polymorphism documented in MeetingsService spec (real verification deferred to 07b-02 smoke test).</done>
+  <done>HeartbeatService basic upsert + findStale exist (Task 4 will extend upsert); HeartbeatController tests pass (Zod validation, success response shape); HeartbeatStalenessService tests pass (cron registration with notificationHourUtc; no-op on no-stale; notification per stale host; loop continues on per-host notification failure); `npm run build` succeeds; AppModule imports HeartbeatModule; VAULT-06 polymorphism contract documented (real verification deferred to 07b-02 smoke test).</done>
+</task>
+
+<task type="auto">
+  <name>Task 4: MEET-06 server-side escalation — extend HeartbeatService.upsert with lastError change-detection + sendUploadFailed (+ heartbeat.service.spec.ts)</name>
+  <files>src/heartbeat/heartbeat.service.ts, src/heartbeat/heartbeat.service.spec.ts, src/heartbeat/heartbeat.module.ts</files>
+  <action>
+**Why this task exists:** MEET-06 requires "On ingest failure, watcher retries with exponential backoff up to 1 hour, then notifies owner via Telegram." The daemon (plan 07b-02) has NO Telegram bot token of its own (RESEARCH.md anti-pattern: "the daemon should NOT have a Telegram bot token"). Its only escalation channel is the `last_error` field on its next heartbeat ping. Plan 07b-01 Task 3 stores that field but never reads it for fresh heartbeats — only for stale ones (>26h) via HeartbeatStalenessService. A daemon that successfully heartbeats daily but has terminal upload failures would silently store `lastError` in the DB and the user would NEVER be notified. This task closes that gap: on every heartbeat upsert, compare incoming `last_error` against the existing row's `lastError`. On a fresh transition (was null OR was a different string, now set to a non-null string), fire `NotificationService.sendUploadFailed` exactly once. Subsequent heartbeats with the same error string do NOT re-notify (de-dupe by exact string equality — daemon-side error messages should be deterministic for the same root cause).
+
+**Edit `src/heartbeat/heartbeat.service.ts`:**
+
+The Task-3 version of `upsert` does a single `prisma.heartbeat.upsert` call. Refactor to:
+1. First, `findUnique({ where: { host } })` to read the EXISTING row's `lastError` (returns `null` if no row yet).
+2. Then perform the upsert (same data shape as Task 3).
+3. Compare `incoming.last_error` against `existing?.lastError ?? null`:
+   - If `incoming.last_error` is non-null AND `incoming.last_error !== (existing?.lastError ?? null)` → fresh transition. Fire-and-forget `this.notifications.sendUploadFailed({ host: row.host, error: incoming.last_error })`.
+   - Otherwise (incoming is null, OR incoming === existing.lastError, OR incoming is null while existing was set) → no notification.
+4. Inject `NotificationService` via constructor (NEW dependency for HeartbeatService).
+5. Update `HeartbeatModule.imports` to include `SchedulerModule` so NotificationService is resolvable. (HeartbeatStalenessService already imports SchedulerModule, but HeartbeatService now needs it too — confirm `HeartbeatModule` already declares `SchedulerModule` in imports per Task 3; if so this is a no-op, just verify.)
+
+**Final shape of `src/heartbeat/heartbeat.service.ts`:**
+
+```typescript
+import { Injectable, Logger } from '@nestjs/common';
+import { PrismaService } from '../prisma/prisma.service';
+import { NotificationService } from '../scheduler/notification.service';
+import type { HeartbeatPayload } from './heartbeat.types';
+
+@Injectable()
+export class HeartbeatService {
+  private readonly logger = new Logger(HeartbeatService.name);
+
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notifications: NotificationService,
+  ) {}
+
+  /**
+   * Upsert a heartbeat keyed by host. Always sets lastSeenAt = now().
+   * Optional fields (version, lastIngestAt, queueDepth, lastError) overwrite if present.
+   *
+   * MEET-06 server-side escalation: on every upsert, compare incoming last_error
+   * against the previously persisted lastError. On a transition (null → string,
+   * or string → different string), fire NotificationService.sendUploadFailed exactly
+   * once — fire-and-forget; failure does NOT fail the upsert. De-duped by exact string
+   * equality, so repeated heartbeats with the same persistent error do not spam the user.
+   */
+  async upsert(p: HeartbeatPayload): Promise<{ host: string; lastSeenAt: Date }> {
+    // Step 1: Read existing row to capture the previous lastError BEFORE overwriting.
+    const existing = await this.prisma.heartbeat.findUnique({ where: { host: p.host } });
+    const previousError: string | null = existing?.lastError ?? null;
+
+    const now = new Date();
+    const data = {
+      host: p.host,
+      version: p.version ?? null,
+      lastSeenAt: now,
+      lastIngestAt: p.last_ingest_at ? new Date(p.last_ingest_at) : null,
+      queueDepth: p.queue_depth ?? null,
+      lastError: p.last_error ?? null,
+    };
+
+    // Step 2: Persist.
+    const row = await this.prisma.heartbeat.upsert({
+      where: { host: p.host },
+      create: data,
+      update: data,
+    });
+    this.logger.log(`Heartbeat upserted host=${p.host} lastSeenAt=${now.toISOString()}`);
+
+    // Step 3: MEET-06 escalation. Fire ONLY when incoming is non-null AND different from previous.
+    const incomingError: string | null = p.last_error ?? null;
+    if (incomingError !== null && incomingError !== previousError) {
+      this.logger.warn(
+        `MEET-06 escalation: host=${p.host} lastError transitioned (previous=${previousError === null ? 'null' : '<set>'}, incoming="${incomingError.slice(0, 80)}")`,
+      );
+      // Fire-and-forget. Telegram failure must NOT fail the heartbeat upsert.
+      this.notifications
+        .sendUploadFailed({ host: row.host, error: incomingError })
+        .catch((err) =>
+          this.logger.error(
+            `sendUploadFailed failed for host=${p.host}: ${String(err)} (heartbeat row still persisted)`,
+          ),
+        );
+    }
+
+    return { host: row.host, lastSeenAt: row.lastSeenAt };
+  }
+
+  /** Find heartbeats whose lastSeenAt is older than `cutoff`. */
+  async findStale(cutoff: Date) {
+    return this.prisma.heartbeat.findMany({ where: { lastSeenAt: { lt: cutoff } } });
+  }
+}
+```
+
+**Verify `src/heartbeat/heartbeat.module.ts`:**
+
+Confirm `SchedulerModule` is already in `imports` (Task 3 added it for HeartbeatStalenessService). If so, no change needed — NotificationService is already exported by SchedulerModule and resolvable for HeartbeatService injection. If for any reason it isn't, add it. Confirm:
+
+```bash
+grep -A 5 "imports:" src/heartbeat/heartbeat.module.ts | grep SchedulerModule
+```
+
+(Expected: at least one match. SchedulerModule must export NotificationService — verify with `grep -A 3 "exports:" src/scheduler/scheduler.module.ts | grep NotificationService`. NotificationService is exported by SchedulerModule per the existing module structure used by ReminderService.)
+
+**Create `src/heartbeat/heartbeat.service.spec.ts`:**
+
+vitest. Mock PrismaService (`heartbeat.findUnique`, `heartbeat.upsert`, `heartbeat.findMany`) and NotificationService (`sendUploadFailed: vi.fn()`). Tests:
+
+1. **Fresh insert with no error**: `findUnique` returns `null`; payload has `last_error: undefined` → upsert called, `sendUploadFailed` NOT called.
+2. **Fresh insert WITH error** (null → string transition; this is the canonical MEET-06 case): `findUnique` returns `null`; payload has `last_error: "ENETUNREACH"` → upsert called, `sendUploadFailed` called EXACTLY once with `{ host: 'mac-mini-home', error: 'ENETUNREACH' }`.
+3. **Repeated same error** (de-dupe): `findUnique` returns `{ lastError: 'ENETUNREACH', ... }`; payload has `last_error: 'ENETUNREACH'` → upsert called, `sendUploadFailed` NOT called.
+4. **Changed error** (string → different string transition; daemon hits a new failure mode): `findUnique` returns `{ lastError: 'ENETUNREACH', ... }`; payload has `last_error: '413 payload too large'` → upsert called, `sendUploadFailed` called EXACTLY once with the NEW error string.
+5. **Recovery** (string → null transition; daemon recovered, next ingest succeeded so it cleared its lastError): `findUnique` returns `{ lastError: 'ENETUNREACH', ... }`; payload has `last_error: null` → upsert called, `sendUploadFailed` NOT called. (We could fire a "recovered" message in a future iteration, but v1 only escalates failures, not recoveries.)
+6. **lastError is undefined vs null vs ''** (Zod normalizes — payload type is `string | null | undefined`): payload omits `last_error` entirely → treated as null → no notification. Empty string `''` is non-null but falsy; for now treat empty string as a non-event by checking truthiness — adjust comparison to `incomingError !== null && incomingError !== '' && incomingError !== previousError`. Document this in the test as "empty string treated as no-error to avoid spurious notifications from misbehaving daemons that send empty strings instead of omitting the field."  *(Optional defensive hardening — apply only if executor judges it worth the extra branch; baseline passes all checker requirements without it.)*
+7. **Notification rejection does not fail the upsert** (RESEARCH.md Pitfall 9 pattern): `sendUploadFailed` returns a rejected Promise; `heartbeat.service.upsert` STILL resolves successfully with the upserted row. Use `await` on the upsert result then assert it equals the expected `{ host, lastSeenAt }` shape. Use a microtask flush (`await Promise.resolve()`) to let the rejection settle, then assert `logger.error` was called.
+8. **findStale shape**: calls `prisma.heartbeat.findMany({ where: { lastSeenAt: { lt: cutoff } } })`.
+
+**Verification step (after writing the spec):**
+
+Run only this spec to keep iteration fast:
+```bash
+npm test -- src/heartbeat/heartbeat.service.spec.ts
+```
+
+Then full module + build:
+```bash
+npm test -- src/heartbeat src/scheduler/notification.service 2>&1 | tail -30
+npm run build 2>&1 | tail -10
+```
+  </action>
+  <verify>
+    <automated>npm test -- src/heartbeat/heartbeat.service.spec.ts 2>&amp;1 | tail -30 &amp;&amp; npm run build 2>&amp;1 | tail -10 &amp;&amp; grep -q "sendUploadFailed" src/heartbeat/heartbeat.service.ts &amp;&amp; grep -q "findUnique" src/heartbeat/heartbeat.service.ts</automated>
+  </verify>
+  <done>HeartbeatService.upsert reads existing row via findUnique BEFORE overwriting; on null→string OR string→different-string transition fires NotificationService.sendUploadFailed exactly once (fire-and-forget); on null→null, string→same-string, or string→null no notification; sendUploadFailed rejection does NOT fail the upsert; spec covers all 7 (or 8 with optional hardening) cases; npm run build passes; HeartbeatModule resolves NotificationService via the already-imported SchedulerModule.</done>
 </task>
 
 </tasks>
@@ -1032,6 +1218,7 @@ it('VAULT-06: VaultService.writeFile is called with kind=meeting so the audit ro
 - `.env.example` documents `CORTEX_LOCAL_SHARED_SECRET`.
 - AppModule imports both MeetingsModule and HeartbeatModule.
 - VaultService is NOT modified (plan re-uses it untouched per RESEARCH.md).
+- MEET-06 server-side escalation chain is wired and tested: HeartbeatService.upsert detects lastError transitions and fires NotificationService.sendUploadFailed exactly once per fresh error (de-duped by string equality).
 - `/vault recent` from Phase 7a is unchanged — VAULT-06 is observably satisfied via polymorphism (verified end-to-end in plan 07b-02 smoke test).
 </verification>
 
@@ -1039,6 +1226,7 @@ it('VAULT-06: VaultService.writeFile is called with kind=meeting so the audit ro
 - MEET-03 (shared-secret auth): SharedSecretGuard returns 401 on missing/wrong tokens via constant-time compare; tests prove all four failure modes ✅
 - MEET-04 (vault write + Meeting row + correct header): MeetingsService.ingest calls VaultService.writeFile with kind='meeting' and the exact body format from HLD §3.8 B-MEET-4; persists Meeting row with all fields ✅
 - MEET-05 (Telegram notification): `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>` via NotificationService.sendMeetingCaptured; duration formatted "47 min" / "1h 12m" ✅
+- MEET-06 (server side — escalate daemon's terminal-failure last_error to Telegram): HeartbeatService.upsert reads existing row's lastError, on null→string or string→different-string transition fires sendUploadFailed exactly once (fire-and-forget; de-dupe via string equality). Daemon-side retry/backoff is delivered in plan 07b-02 ✅
 - MEET-07 (audio never crosses): IngestPayloadSchema accepts only text fields; no audio/binary path through any code path ✅
 - MEET-08 (workspace = Work always): `findByName('work')`; tests assert this exclusively ✅
 - MEET-09 (server side — receive heartbeat + alert if >26h): HeartbeatController.ingest upserts Heartbeat row; HeartbeatStalenessService runs daily at `Settings.notificationHourUtc` and notifies per stale host ✅
@@ -1051,12 +1239,12 @@ After completion, create `.planning/phases/07b-meeting-capture/07b-01-SUMMARY.md
 - Schema diff: added Meeting + Heartbeat models, MeetingSource enum, Workspace.meetings back-relation
 - New `src/auth/shared-secret.guard.ts` (CanActivate; constant-time via timingSafeEqual; throws UnauthorizedException — explicitly different from ChatIdGuard's silent drop, with rationale)
 - New `src/meetings/` module: controller (`@UseGuards(SharedSecretGuard)`), service (slug via `slug` lib — no LLM; workspace locked Work; idempotency on external_id; fire-and-forget notification)
-- New `src/heartbeat/` module: controller (upsert), service, daily-staleness pg-boss cron registered at `Settings.notificationHourUtc`
-- Extended `NotificationService` with sendMeetingCaptured + sendHeartbeatStale + formatDuration helper
+- New `src/heartbeat/` module: controller (upsert), service with MEET-06 lastError change-detection (Task 4), daily-staleness pg-boss cron registered at `Settings.notificationHourUtc`
+- Extended `NotificationService` with sendMeetingCaptured + sendHeartbeatStale + sendUploadFailed + formatDuration helper
+- MEET-06 escalation chain: HeartbeatService.upsert reads previous lastError, fires sendUploadFailed exactly once on fresh transition, de-duped by string equality. Daemon-side retry/backoff is delivered in plan 07b-02 — together they close MEET-06.
 - Body parser raised to 5 MB in `src/main.ts`
 - VAULT-06 status: inherited polymorphic from 7a — handler/formatter unchanged; verification deferred to plan 07b-02 smoke test
 - Endpoints exposed for plan 07b-02 to consume: `POST /api/meetings/ingest`, `POST /api/heartbeat`
 - Any deviations from RESEARCH.md and why
 </output>
 </content>
-</invoke>

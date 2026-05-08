@@ -26,13 +26,6 @@ const makeConfig = (stateDir: string): Config => ({
   meetilyOutputDir: '/tmp/meetily',
   host: 'mac-mini-home',
   stateDir,
-  frontmatterFields: {
-    title: 'title',
-    startedAt: 'started_at',
-    endedAt: 'ended_at',
-    attendees: 'attendees',
-    externalId: 'meeting-id',
-  },
   heartbeatCron: '0 9 * * *',
 });
 
