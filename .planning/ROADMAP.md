@@ -12,14 +12,14 @@ Cortex delivers zero-friction capture through a Telegram bot backed by LLM intel
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Project Foundation** - NestJS scaffold, Prisma schema, task domain, and workspace isolation
-- [ ] **Phase 2: Intelligence Layer** - LLM decomposition, voice transcription, session context, and conversational follow-up
-- [ ] **Phase 3: Telegram Interface** - Bot webhook, message capture, inline keyboards, commands, and comments
-- [ ] **Phase 4: Proactive Management** - Deadline reminders, stale task check-ins, and deferred task resurfacing
-- [ ] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
-- [ ] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
+- [x] **Phase 1: Project Foundation** - NestJS scaffold, Prisma schema, task domain, and workspace isolation
+- [x] **Phase 2: Intelligence Layer** - LLM decomposition, voice transcription, session context, and conversational follow-up
+- [x] **Phase 3: Telegram Interface** - Bot webhook, message capture, inline keyboards, commands, and comments
+- [x] **Phase 4: Proactive Management** - Deadline reminders, stale task check-ins, and deferred task resurfacing
+- [x] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
+- [x] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
 - [x] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
-- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), `/api/meetings/ingest` endpoint, Meetily integration, vault write to `raw/meetings/`, Telegram notification, `/vault recent` *(code complete; human checkpoint pending)*
+- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), Fathom cloud webhook (`/api/meetings/fathom-webhook`, HMAC-SHA256), vault write to `raw/meetings/`, Telegram notification, `/vault recent` *(code complete; Meetily human checkpoint pending; Fathom path live)*
 
 ## Phase Details
 
@@ -36,8 +36,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans**: 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md -- Project scaffold, Prisma schema, database setup, WorkspaceService
-- [ ] 01-02-PLAN.md -- Task domain service with TDD (CRUD, status, sub-tasks, workspace isolation, prefix parsing)
+- [x] 01-01-PLAN.md -- Project scaffold, Prisma schema, database setup, WorkspaceService
+- [x] 01-02-PLAN.md -- Task domain service with TDD (CRUD, status, sub-tasks, workspace isolation, prefix parsing)
 
 ### Phase 2: Intelligence Layer
 **Goal**: The LLM and voice modules can accept unstructured input, decompose it into structured tasks, maintain multi-turn session context, and enrich existing tasks through follow-up -- all callable as services without Telegram
@@ -52,9 +52,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md -- LLM core (model routing, token logging) + brain dump decomposition with TDD
-- [ ] 02-02-PLAN.md -- Redis session management (SessionService with TTL, state machine, topic context)
-- [ ] 02-03-PLAN.md -- Classification, follow-up question generation, enrichment services + module wiring
+- [x] 02-01-PLAN.md -- LLM core (model routing, token logging) + brain dump decomposition with TDD
+- [x] 02-02-PLAN.md -- Redis session management (SessionService with TTL, state machine, topic context)
+- [x] 02-03-PLAN.md -- Classification, follow-up question generation, enrichment services + module wiring
 
 ### Phase 3: Telegram Interface
 **Goal**: The user interacts entirely through Telegram -- sending text or voice messages, receiving structured task breakdowns, managing tasks via buttons, running commands, and adding comments -- completing the end-to-end capture loop
@@ -69,8 +69,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md -- Schema changes (Comment model, telegramMsgId), dependencies, foundation services (VoiceService, MessageFormatterService, ChatIdGuard, CommentService, CommentProcessingService)
-- [ ] 03-02-PLAN.md -- OrchestratorService (end-to-end pipeline), TelegramUpdate handler (all decorators), module wiring, webhook setup
+- [x] 03-01-PLAN.md -- Schema changes (Comment model, telegramMsgId), dependencies, foundation services (VoiceService, MessageFormatterService, ChatIdGuard, CommentService, CommentProcessingService)
+- [x] 03-02-PLAN.md -- OrchestratorService (end-to-end pipeline), TelegramUpdate handler (all decorators), module wiring, webhook setup
 
 ### Phase 4: Proactive Management
 **Goal**: The system actively manages timelines by sending reminders before deadlines, prompting check-ins on stale tasks, and resurfacing deferred tasks on their resume dates
@@ -83,8 +83,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 04-01-PLAN.md -- Settings model, pg-boss scheduler lifecycle, NotificationService (proactive Telegram messaging), SettingsService
-- [ ] 04-02-PLAN.md -- ReminderService (deadline job scheduling), PollingService (stale check-ins + deferred resurfacing), TaskService hooks, AppModule wiring
+- [x] 04-01-PLAN.md -- Settings model, pg-boss scheduler lifecycle, NotificationService (proactive Telegram messaging), SettingsService
+- [x] 04-02-PLAN.md -- ReminderService (deadline job scheduling), PollingService (stale check-ins + deferred resurfacing), TaskService hooks, AppModule wiring
 
 ### Phase 5: Calendar Integration
 **Goal**: Tasks with deadlines and meetings flow into Google Calendar, with stakeholder emails resolved from a contacts directory and time blocks suggested based on effort estimates
@@ -97,8 +97,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 05-01-PLAN.md -- Schema (Contact, CalendarEvent), dependencies, GoogleAuthService, CalendarService, ContactService, CalendarModule
-- [ ] 05-02-PLAN.md -- CalendarExtractionService, TimeBlockService, OrchestratorService extension, Telegram wiring
+- [x] 05-01-PLAN.md -- Schema (Contact, CalendarEvent), dependencies, GoogleAuthService, CalendarService, ContactService, CalendarModule
+- [x] 05-02-PLAN.md -- CalendarExtractionService, TimeBlockService, OrchestratorService extension, Telegram wiring
 
 ### Phase 6: Web Dashboard
 **Goal**: A supplementary visual interface where the user can see all tasks at a glance, switch between views, and filter by workspace, status, or deadline
@@ -111,9 +111,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Backend REST API (TaskController, WorkspaceController, CORS, ApiKeyGuard)
-- [ ] 06-02-PLAN.md -- Dashboard scaffold (Vite + React + Tailwind + shadcn/ui + TanStack Router/Query + PWA + API client)
-- [ ] 06-03-PLAN.md -- Dashboard views (kanban board with dnd-kit, list view with TanStack Table, filters, view toggle)
+- [x] 06-01-PLAN.md -- Backend REST API (TaskController, WorkspaceController, CORS, ApiKeyGuard)
+- [x] 06-02-PLAN.md -- Dashboard scaffold (Vite + React + Tailwind + shadcn/ui + TanStack Router/Query + PWA + API client)
+- [x] 06-03-PLAN.md -- Dashboard views (kanban board with dnd-kit, list view with TanStack Table, filters, view toggle)
 
 ### Phase 7a: Note Capture
 **Goal**: User can invoke `/note` on Telegram (text or voice) and have the content land verbatim in `nirvana-wiki/raw/inbox/` as a committed and pushed markdown file, with a 60-second undo path -- without altering existing task-capture behavior
@@ -133,12 +133,12 @@ Plans:
 - [x] 07a-02-PLAN.md -- `/note` Telegram command handler (text + voice + reply forms), Sonnet slug generation, OrchestratorService extension, [Undo] callback wiring, `/vault recent` command
 
 ### Phase 7b: Meeting Capture
-**Goal**: A Google Meet call captured locally by Meetily on the Mac mini lands as a verbatim transcript at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds of the meeting ending, without any user action — and the user is notified on Telegram
-**Depends on**: Phase 7a (VaultModule), Meetily installed and configured on the Mac mini
+**Goal**: Meeting transcripts land at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds via two ingest paths: (1) `cortex-local` daemon watching Meetily output on the Mac mini, or (2) Fathom cloud webhook — without any user action, with Telegram notification on capture
+**Depends on**: Phase 7a (VaultModule), Meetily installed and configured on the Mac mini (path 1) or Fathom account with webhook configured (path 2)
 **Requirements**: MEET-01, MEET-02, MEET-03, MEET-04, MEET-05, MEET-06, MEET-07, MEET-08, MEET-09, VAULT-06
 **Success Criteria** (what must be TRUE):
   1. After a Google Meet call ends, a transcript file appears at `raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds, with the correct date / start time / end time / attendees in the file header
-  2. The body is the verbatim Meetily transcript (with speaker labels and timestamps if Meetily provides them) — cortex does not summarize, paraphrase, or extract action items
+  2. The body is the verbatim transcript — Meetily path: raw transcript; Fathom path: ## Summary / ## Action Items / ## Transcript sections from Fathom's AI output — cortex writes these verbatim without further processing
   3. Telegram receives a notification: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
   4. Audio never leaves the Mac mini — only transcript text crosses the network
   5. If `cortex-local` cannot reach the cortex API or push fails, it retries with exponential backoff up to 1 hour, then notifies the owner via Telegram
@@ -150,6 +150,7 @@ Plans:
 Plans:
 - [x] 07b-01-PLAN.md -- Schema (Meeting, Heartbeat), MeetingsController + `/api/meetings/ingest`, `/api/heartbeat` endpoint + heartbeat-staleness scheduled job, `/vault recent` command
 - [x] 07b-02-PLAN.md -- `cortex-local` daemon (chokidar watcher, file-stable detection, POST + retry, ingest marker, daily heartbeat ping, launchd plist, install script)
+- [x] *(ad-hoc)* Fathom webhook ingest: `FathomWebhookController` (`POST /api/meetings/fathom-webhook`, HMAC-SHA256 guard), source-aware `buildBody()`, discriminated `IngestPayloadSchema`, `fathom-register-webhook.ts` + `fathom-backfill.ts` scripts, queue race fix
 
 ## Progress
 
@@ -162,8 +163,8 @@ Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if 
 | 1. Project Foundation | 2/2 | Complete | 2026-02-27 |
 | 2. Intelligence Layer | 3/3 | Complete | 2026-02-27 |
 | 3. Telegram Interface | 2/2 | Complete | 2026-02-28 |
-| 4. Proactive Management | 0/? | Not started | - |
-| 5. Calendar Integration | 0/? | Not started | - |
-| 6. Web Dashboard | 0/? | Not started | - |
+| 4. Proactive Management | 2/2 | Complete | 2026-02-28 |
+| 5. Calendar Integration | 2/2 | Complete | 2026-02-28 |
+| 6. Web Dashboard | 3/3 | Complete | 2026-02-28 |
 | 7a. Note Capture | 2/2 | Complete | 2026-04-30 |
-| 7b. Meeting Capture | 2/2 | In Progress | - |
+| 7b. Meeting Capture | 2/2 + Fathom (ad-hoc) | In Progress | - |
