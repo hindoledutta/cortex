@@ -13,7 +13,6 @@ import { SchedulerModule } from './scheduler/scheduler.module';
 import { VaultModule } from './vault/vault.module';
 import { NoteModule } from './note/note.module';
 import { MeetingsModule } from './meetings/meetings.module';
-import { HeartbeatModule } from './heartbeat/heartbeat.module';
 
 @Module({
   imports: [
@@ -31,7 +30,6 @@ import { HeartbeatModule } from './heartbeat/heartbeat.module';
     VaultModule,
     NoteModule,
     MeetingsModule,
-    HeartbeatModule,
   ],
 })
 export class AppModule {}

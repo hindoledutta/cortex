@@ -113,11 +113,9 @@ Recent decisions affecting current work:
 - [Phase 07a-note-capture]: 10-min voice cap in handleVoice short-circuit BEFORE getFileLink per RESEARCH.md Pitfall 6
 - [Phase 07a-note-capture]: pollingIntervalSeconds not valid in pg-boss v12 ConstructorOptions — replaced with monitorIntervalSeconds
 - [Phase 07b-meeting-capture]: SharedSecretGuard throws UnauthorizedException (not silent drop) — daemon must know its token is wrong, unlike ChatIdGuard which silently drops Telegram noise
-- [Phase 07b-meeting-capture]: HeartbeatService reads existing row via findUnique BEFORE upsert to detect lastError transitions for MEET-06 escalation chain
 - [Phase 07b-meeting-capture]: Migration written manually (not via prisma migrate diff) — Prisma 7 requires shadow DB for from-migrations diff; correct approach is hand-write only new DDL
 - [Phase 07b-meeting-capture]: Zod v4 nested .default({}) requires full default object — inner field defaults only apply when the outer key is present; fix is to provide the full default object at the outer .default() call
-- [Phase 07b-meeting-capture]: cortex-local is standalone subproject (not a workspace): own node_modules, own tsconfig — keeps daemon self-contained for install.sh deployment, avoids NestJS version conflicts
-- [Phase 07b-meeting-capture]: MEET-07 filter is hard .md extension check at top of processFile — audio never reaches any I/O, queue, or network call
+- [Phase 07b-meeting-capture]: Meetily / cortex-local path dropped 2026-05-19 — meeting capture is now Fathom-only via webhook (`/api/meetings/fathom-webhook`) and shared-secret-guarded backfill (`/api/meetings/ingest`)
 
 ### Pending Todos
 

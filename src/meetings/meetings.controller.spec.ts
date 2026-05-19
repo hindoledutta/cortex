@@ -10,7 +10,7 @@ const VALID_PAYLOAD = {
   ended_at: '2026-04-26T10:47:00Z',
   attendees: ['alice@example.com', 'bob@example.com'],
   transcript: 'This is the meeting transcript.',
-  source: 'meetily' as const,
+  source: 'fathom' as const,
 };
 
 const MOCK_INGEST_RESULT = {

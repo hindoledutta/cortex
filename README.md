@@ -167,33 +167,28 @@ CORTEX_LOCAL_SHARED_SECRET=... npm run fathom-backfill -- --ingest
 
 ---
 
-## Meetings — Meetily / cortex-local (Mac mini)
+## Meetings — Fathom (cloud)
 
-The cortex-local daemon on the Mac mini watches Meetily's output folder and POSTs transcripts to Cortex. It pings a heartbeat daily; if silent for >26 hours you get a Telegram alert.
+Meeting transcripts come from Fathom and land in the vault automatically — no daemon, no Mac-side software.
 
-### Install
+### Webhook (live capture)
 
-```bash
-cd cortex-local
-bash scripts/install.sh   # interactive — sets API URL, shared secret, watch dir
-```
+Fathom posts each completed recording to `POST /api/meetings/fathom-webhook`, signed with HMAC-SHA256. Cortex verifies the signature, writes the transcript to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{slug}.md`, and DMs you a confirmation.
 
-### What gets installed
-
-| Item | Path |
-|---|---|
-| Config | `~/Library/Application Support/cortex-local/config.json` |
-| Logs | `~/Library/Logs/cortex-local.out.log` / `.err.log` |
-| Launchd plist | `~/Library/LaunchAgents/com.cortex.local.plist` |
-
-Auto-restarts on crash (ThrottleInterval 30s). Starts on login.
-
-### Validate before going live
+Webhook is registered once via:
 
 ```bash
-cd cortex-local
-npm run dry-run -- /path/to/sample-meeting-folder
+npm run register-fathom-webhook
 ```
+
+### Backfill (historical recordings)
+
+```bash
+npm run fathom-backfill              # dry-run: list what would be ingested
+npm run fathom-backfill -- --ingest  # actually POST to /api/meetings/ingest
+```
+
+The backfill script uses the shared-secret-guarded `/api/meetings/ingest` endpoint. Requires `FATHOM_API_KEY`, `CORTEX_PUBLIC_URL`, and `CORTEX_LOCAL_SHARED_SECRET` in your env.
 
 ---
 
@@ -225,8 +220,6 @@ Cortex sends these automatically — no user action needed.
 | 📋 Check-in | Task `in_progress` for N days without update | "How's {title} going?" + status buttons |
 | 🔄 Resurfaced | Deferred task's resume date reached | "Ready to pick up?" + [Start] [Done] [Defer] |
 | 📝 Meeting captured | After successful vault write | Title, duration, attendee count, vault path |
-| ⚠️ cortex-local silent | Daemon hasn't pinged in >26h | Host, hours since last seen |
-| ⚠️ Upload failed | Daemon `last_error` changes | Host + error text |
 
 ---
 
@@ -361,15 +354,13 @@ src/                  NestJS backend
   calendar/           Google Calendar integration
   scheduler/          pg-boss job processors (reminders, check-ins, resurfacing)
   vault/              Git-backed file writer (mutex-serialized)
-  heartbeat/          cortex-local liveness monitoring
   workspace/          Work/Personal scoping
   session/            Redis-backed 30-min conversation context
   settings/           Per-user preferences
   auth/               SharedSecretGuard, FathomWebhookGuard
 prisma/               Schema, migrations, seed
 dashboard/            React PWA
-cortex-local/         Mac mini daemon (Meetily watcher + heartbeat)
-scripts/              One-off utilities
+scripts/              One-off utilities (fathom backfill, OAuth setup, etc.)
 docs/hld.md           Full high-level design
 .planning/            GSD phase-based planning artifacts
 ```

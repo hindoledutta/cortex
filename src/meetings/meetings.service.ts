@@ -111,9 +111,8 @@ export class MeetingsService {
     endedFmt: string,
     attendeesLine: string,
   ): string {
-    const sourceLabel = p.source === 'fathom' ? 'Fathom' : 'Meetily (Google Meet)';
     const header = [
-      `Source: ${sourceLabel}`,
+      `Source: Fathom`,
       `Date: ${dateStr}`,
       `Started: ${startedFmt}`,
       `Ended: ${endedFmt}`,
@@ -123,7 +122,7 @@ export class MeetingsService {
       ``,
     ].join('\n');
 
-    if (p.source === 'fathom' && (p.summary || p.action_items?.length)) {
+    if (p.summary || p.action_items?.length) {
       const parts: string[] = [];
       if (p.summary) parts.push('## Summary', '', p.summary, '');
       if (p.action_items?.length) {

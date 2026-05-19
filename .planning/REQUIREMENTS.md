@@ -68,15 +68,13 @@ Requirements for initial release. Each maps to roadmap phases.
 
 ### Knowledge Capture — Meetings (Phase 7b)
 
-- [x] **MEET-01**: A `cortex-local` watcher daemon runs on the Mac mini under launchd, watching Meetily's output directory
-- [x] **MEET-02**: When a new transcript file appears, the watcher waits for the file to be stable (5s) and POSTs it to cortex API
-- [x] **MEET-03**: Cortex authenticates the watcher via shared-secret Bearer token on `/api/meetings/ingest`
-- [x] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header
+> **Rescope (2026-05-19):** Originally planned around a local cortex-local daemon watching Meetily. That path was dropped — meeting capture is now Fathom-only. Requirements below reflect the current Fathom architecture; original Meetily-specific requirements (MEET-01, -02, -06, -07, -09) are dropped.
+
+- [x] **MEET-02**: When Fathom signals a completed recording, cortex receives an HMAC-SHA256-signed webhook at `POST /api/meetings/fathom-webhook` with title, started_at, ended_at, attendees, transcript, and optional summary + action_items
+- [x] **MEET-03**: Cortex verifies the webhook signature against `FATHOM_WEBHOOK_SECRET` (the `whsec_` value from Fathom's dashboard, base64-decoded before HMAC); for backfill, `POST /api/meetings/ingest` is shared-secret-Bearer-authenticated
+- [x] **MEET-04**: Cortex persists a Meeting row and writes the transcript verbatim to `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` with a Source / Date / Started / Ended / Attendees header, plus Summary / Action Items / Transcript sections from Fathom's AI output
 - [x] **MEET-05**: Bot DMs owner: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
-- [x] **MEET-06**: On ingest failure, watcher retries with exponential backoff up to 1 hour, then notifies owner via Telegram
-- [x] **MEET-07**: Audio never leaves the Mac (Meetily transcribes locally; cortex receives only text)
 - [x] **MEET-08**: All Meeting rows are created in the Work workspace by default (no attendee-domain heuristic in v1)
-- [x] **MEET-09**: `cortex-local` sends a daily heartbeat (`POST /api/heartbeat`) and cortex DMs the owner if the last heartbeat is older than 26 hours
 
 ### Knowledge Capture — Vault (Phase 7 shared)
 
@@ -117,7 +115,7 @@ Explicitly excluded. Documented to prevent scope creep.
 | Cortex writing to `nirvana-wiki/wiki/` (curated) | Owned by the existing Claude-ingest workflow; two writers would drift |
 | Real-time / live meeting transcription | Post-meeting only; live coaching is a different product |
 | Audio file persistence (DB or vault) | Transcripts only; audio is a privacy + storage liability |
-| Multi-source meeting ingestion in v1 | Meetily-only; the same `/api/meetings/ingest` accepts other sources later |
+| Multi-source meeting ingestion | Fathom-only; adding Otter/Zoom-AI/etc. would require a new webhook controller per source |
 | Cortex-side meeting summaries / action item extraction | The wiki-ingest workflow already does source-summary extraction when promoting `raw/` → `wiki/` |
 | New query/search surface (Telegram `/search`, web search UI) | Obsidian + Claude Code in the vault + curated `wiki/` views already cover queryability |
 

@@ -14,7 +14,7 @@ const VALID_PAYLOAD: IngestPayload = {
   ended_at: '2026-04-26T10:47:00Z',
   attendees: ['alice@example.com', 'bob@example.com'],
   transcript: 'This is the meeting transcript.',
-  source: 'meetily',
+  source: 'fathom',
   external_id: undefined,
 };
 
@@ -130,7 +130,7 @@ describe('MeetingsService', () => {
     const writeArgs = vaultWriteFile.mock.calls[0][0];
     const body: string = writeArgs.body;
 
-    expect(body).toContain('Source: Meetily (Google Meet)');
+    expect(body).toContain('Source: Fathom');
     expect(body).toContain('Date: 2026-04-26');
     expect(body).toContain('Started: 10:00');
     expect(body).toContain('Ended: 10:47');
@@ -228,7 +228,7 @@ describe('MeetingsService', () => {
       expect(body).toContain(FATHOM_PAYLOAD.transcript);
     });
 
-    it('idempotency query uses p.source, not hardcoded meetily', async () => {
+    it('idempotency query passes source field to findFirst', async () => {
       const existing = {
         id: 'fathom-existing',
         vaultPath: 'raw/meetings/2026-05-01-design-review.md',

@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Calendar Integration** - Google Calendar events, contacts directory, and time blocking suggestions
 - [x] **Phase 6: Web Dashboard** - PWA with kanban view, list view, and filters
 - [x] **Phase 7a: Note Capture** - `/note` Telegram command, Vault Module (git pull/write/commit/push), Sonnet slug generation, [Undo], VaultWrite audit log
-- [ ] **Phase 7b: Meeting Capture** - `cortex-local` watcher daemon (launchd), Fathom cloud webhook (`/api/meetings/fathom-webhook`, HMAC-SHA256), vault write to `raw/meetings/`, Telegram notification, `/vault recent` *(code complete; Meetily human checkpoint pending; Fathom path live)*
+- [x] **Phase 7b: Meeting Capture** - Fathom cloud webhook (`/api/meetings/fathom-webhook`, HMAC-SHA256) and authenticated `/api/meetings/ingest` for backfill, vault write to `raw/meetings/`, Telegram notification, `/vault recent`
 
 ## Phase Details
 
@@ -133,24 +133,21 @@ Plans:
 - [x] 07a-02-PLAN.md -- `/note` Telegram command handler (text + voice + reply forms), Sonnet slug generation, OrchestratorService extension, [Undo] callback wiring, `/vault recent` command
 
 ### Phase 7b: Meeting Capture
-**Goal**: Meeting transcripts land at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds via two ingest paths: (1) `cortex-local` daemon watching Meetily output on the Mac mini, or (2) Fathom cloud webhook — without any user action, with Telegram notification on capture
-**Depends on**: Phase 7a (VaultModule), Meetily installed and configured on the Mac mini (path 1) or Fathom account with webhook configured (path 2)
-**Requirements**: MEET-01, MEET-02, MEET-03, MEET-04, MEET-05, MEET-06, MEET-07, MEET-08, MEET-09, VAULT-06
+**Goal**: Meeting transcripts land at `nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds of a meeting ending, sourced from Fathom — without user action, with Telegram notification on capture
+**Depends on**: Phase 7a (VaultModule), Fathom account with webhook configured
+**Requirements**: MEET-01, MEET-02, MEET-03, MEET-07, VAULT-06
 **Success Criteria** (what must be TRUE):
-  1. After a Google Meet call ends, a transcript file appears at `raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds, with the correct date / start time / end time / attendees in the file header
-  2. The body is the verbatim transcript — Meetily path: raw transcript; Fathom path: ## Summary / ## Action Items / ## Transcript sections from Fathom's AI output — cortex writes these verbatim without further processing
+  1. After a Fathom-recorded call ends, a transcript file appears at `raw/meetings/YYYY-MM-DD-{title-slug}.md` in GitHub within 30 seconds, with the correct date / start time / end time / attendees in the file header
+  2. The body is verbatim ## Summary / ## Action Items / ## Transcript sections from Fathom's AI output — cortex writes these without further processing
   3. Telegram receives a notification: `Meeting captured: "<title>" (<duration>, <N> attendees) → <vault path>`
-  4. Audio never leaves the Mac mini — only transcript text crosses the network
-  5. If `cortex-local` cannot reach the cortex API or push fails, it retries with exponential backoff up to 1 hour, then notifies the owner via Telegram
-  6. `/vault recent` on Telegram returns the last 10 vault writes (notes + meetings) with status
-  7. All Meeting rows default to the Work workspace (locked decision; no attendee-domain heuristic in v1)
-  8. `cortex-local` sends a daily heartbeat to cortex; cortex alerts via Telegram if no heartbeat received in 26 hours
-**Plans**: 2 plans
+  4. `/vault recent` on Telegram returns the last 10 vault writes (notes + meetings) with status
+  5. All Meeting rows default to the Work workspace (locked decision; no attendee-domain heuristic in v1)
+**Plans**: shipped (ad-hoc — see commit history)
 
-Plans:
-- [x] 07b-01-PLAN.md -- Schema (Meeting, Heartbeat), MeetingsController + `/api/meetings/ingest`, `/api/heartbeat` endpoint + heartbeat-staleness scheduled job, `/vault recent` command
-- [x] 07b-02-PLAN.md -- `cortex-local` daemon (chokidar watcher, file-stable detection, POST + retry, ingest marker, daily heartbeat ping, launchd plist, install script)
-- [x] *(ad-hoc)* Fathom webhook ingest: `FathomWebhookController` (`POST /api/meetings/fathom-webhook`, HMAC-SHA256 guard), source-aware `buildBody()`, discriminated `IngestPayloadSchema`, `fathom-register-webhook.ts` + `fathom-backfill.ts` scripts, queue race fix
+- `FathomWebhookController` (`POST /api/meetings/fathom-webhook`, HMAC-SHA256 guard)
+- `MeetingsController` (`POST /api/meetings/ingest`, shared-secret bearer auth) for `fathom-backfill.ts`
+- `fathom-register-webhook.ts` + `fathom-backfill.ts` scripts
+- `/vault recent` Telegram command
 
 ## Progress
 
@@ -167,4 +164,4 @@ Note: Phase 6 depends on Phase 1 (not Phase 5) and could start after Phase 3 if 
 | 5. Calendar Integration | 2/2 | Complete | 2026-02-28 |
 | 6. Web Dashboard | 3/3 | Complete | 2026-02-28 |
 | 7a. Note Capture | 2/2 | Complete | 2026-04-30 |
-| 7b. Meeting Capture | 2/2 + Fathom (ad-hoc) | In Progress | - |
+| 7b. Meeting Capture | Fathom (ad-hoc) | Complete | 2026-05-14 |

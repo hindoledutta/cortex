@@ -28,5 +28,5 @@
     "types": ["vitest/globals"]
   },
   "include": ["src/**/*", "scripts/**/*", "prisma/**/*"],
-  "exclude": ["node_modules", "dist", "dashboard", "cortex-local"]
+  "exclude": ["node_modules", "dist", "dashboard"]
 }

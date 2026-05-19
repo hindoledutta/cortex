@@ -23,7 +23,7 @@ Cortex is a personal intelligent capture system. It turns unstructured voice and
 6. **Reminder system** — Telegram push notifications for deadlines and follow-ups
 7. **Web dashboard** (Phase 3) — full task management with kanban, filters, timeline views
 8. **Note capture** (Phase 4) — `/note` on Telegram routes voice/text into `nirvana-wiki/raw/inbox/` instead of becoming a task
-9. **Meeting capture** (Phase 4) — Google Meet calls auto-recorded locally via Meetily, transcribed locally, then ingested into `nirvana-wiki/raw/meetings/` post-meeting
+9. **Meeting capture** (Phase 7b) — Fathom records and transcribes meetings in the cloud, then posts a webhook to cortex which writes the transcript to `nirvana-wiki/raw/meetings/`
 
 ### Scope
 Solo personal use. Single user. No multi-tenancy, no team features, no sharing.
@@ -225,30 +225,27 @@ captured → active → in_progress → done
 
 ### 3.8 Meeting Capture
 
+> **Rescope (2026-05-19):** Originally designed around a local `cortex-local` daemon watching Meetily output on the Mac mini. That path was dropped — meeting capture is now Fathom-only. The original Meetily-based building blocks are preserved in git history; this section reflects the current Fathom-only architecture.
+
 **B-MEET-1: Recording stack**
-- The user runs **Meetily** (open-source, local) on their Mac mini. Meetily captures system audio + mic during Google Meet calls (no bot joining the call), transcribes locally with Whisper or Parakeet, and writes a transcript file plus a sidecar JSON to a configured output directory.
-- Audio never leaves the Mac. Cortex consumes only the transcript text. This HLD does not redesign Meetily — only consumes its outputs.
+- Fathom records and transcribes meetings in the cloud. No local daemon, no Mac-side software, no bot joining the call (Fathom uses its own recording mechanism).
+- Cortex consumes Fathom's webhook output: title, started_at, ended_at, attendees, transcript, plus optional summary + action_items from Fathom's AI.
 
-**B-MEET-2: Local watcher (`cortex-local`)**
-- A small daemon runs on the Mac mini under `launchd`. Net-new component, lives in cortex repo at `cortex-local/` with its own minimal package.
-- Watches Meetily's output directory using `chokidar` for new transcript files.
-- On a new transcript:
-  1. Wait for Meetily to finish writing (file size stable for 5 seconds).
-  2. Read transcript + sidecar metadata (title, attendees, started_at, ended_at when available).
-  3. POST to cortex API `/api/meetings/ingest` with `{ title, started_at, ended_at, attendees, transcript, source: "meetily" }`.
-  4. On 200 OK, mark the file as ingested (move to `meetily-output/_ingested/` or write a `.cortex-ingested` sidecar) so it isn't re-sent.
-  5. On error, retry with exponential backoff up to 1 hour, then notify the owner via Telegram.
-
-**B-MEET-3: Cortex-side ingestion**
-- New `MeetingsController.ingest()` handler authenticates via shared secret in the `Authorization: Bearer` header (env: `CORTEX_LOCAL_SHARED_SECRET`).
+**B-MEET-2: Webhook ingestion (`POST /api/meetings/fathom-webhook`)**
+- `FathomWebhookController` authenticates incoming requests by verifying an HMAC-SHA256 signature against `FATHOM_WEBHOOK_SECRET` (the `whsec_` value from Fathom's dashboard, base64-decoded).
 - Validates payload with Zod, persists a `Meeting` row, then enqueues a vault-write job through the existing pg-boss scheduler.
-- **Workspace assignment**: every Meeting is created in the **Work** workspace by default. No attendee-domain heuristic in v1. Manual reassignment is possible via DB / dashboard if a meeting is misclassified.
+- **Workspace assignment**: every Meeting is created in the **Work** workspace. No attendee-domain heuristic.
+
+**B-MEET-3: Backfill ingestion (`POST /api/meetings/ingest`)**
+- `MeetingsController.ingest()` authenticates via shared-secret bearer header (`CORTEX_LOCAL_SHARED_SECRET` — env name retained for historical reasons).
+- Used by `scripts/fathom-backfill.ts` to backfill historical Fathom recordings via the Fathom API.
+- Accepts the same Zod schema as the webhook controller.
 
 **B-MEET-4: File format in vault**
 - Path: `~/nirvana-wiki/raw/meetings/YYYY-MM-DD-{title-slug}.md`
 - Body:
   ```
-  Source: Meetily (Google Meet)
+  Source: Fathom
   Date: 2026-04-26
   Started: 14:00
   Ended: 14:47
@@ -256,22 +253,23 @@ captured → active → in_progress → done
 
   ---
 
-  <full transcript, with speaker labels and timestamps if Meetily provides them>
+  ## Summary
+  <Fathom-generated summary, if present>
+
+  ## Action Items
+  - <Fathom-extracted action items, if present>
+
+  ## Transcript
+  <verbatim transcript>
   ```
-- Cortex does **not** generate a summary, action items, or wiki-links. The existing wiki-ingest workflow handles `raw/meetings/*.md` the same way it already handles `raw/podcasts/` and `raw/articles/`.
+- Cortex writes these sections verbatim from Fathom's webhook payload — no additional LLM processing on cortex's side.
 
 **B-MEET-5: Telegram notification**
 - After successful vault write, the bot DMs the owner: `Meeting captured: "Q2 Roadmap Review" (47 min, 3 attendees) → raw/meetings/2026-04-26-q2-roadmap-review.md`.
 - No interactive buttons on this notification — it is informational.
 
 **B-MEET-6: No real-time, no live transcription**
-- Meeting capture is strictly post-meeting. No live transcript streaming, no in-call assistance, no on-call summary. Out of scope for v1.
-
-**B-MEET-7: Heartbeat & liveness**
-- `cortex-local` sends `POST /api/heartbeat` once every 24 hours with `{ host, version, last_ingest_at, queue_depth }`.
-- Cortex stores the most recent heartbeat per host (single host in v1: the Mac mini).
-- A scheduled job runs at the configurable user notification hour: if the most recent heartbeat is older than 26 hours (24h cadence + 2h grace), the bot DMs the owner: `cortex-local on <host> hasn't checked in for <N> hours — Meetily may not be capturing meetings.`
-- Heartbeat is an availability signal, not a meeting-existence signal. Calendar-aware monitoring ("expected meeting time passed without a transcript") is explicitly deferred — it would couple meeting capture to Phase 5 calendar infrastructure.
+- Meeting capture is strictly post-meeting. No live transcript streaming, no in-call assistance.
 
 ### 3.9 Vault Write & Sync
 
@@ -436,21 +434,18 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
     actor U as User
-    participant Meet as Google Meet
-    participant Meetily as Meetily (Mac mini)
-    participant Local as cortex-local watcher
+    participant Meet as Google Meet / Zoom
+    participant Fathom as Fathom (cloud)
     participant API as Cortex API
     participant DB as PostgreSQL
     participant Git as nirvana-wiki (GitHub)
     participant T as Telegram
 
-    U->>Meet: Joins call (no bot in attendee list)
-    Meet-->>Meetily: System audio + mic (local)
-    Note over Meetily: Local Whisper/Parakeet transcribes
-    Meetily->>Meetily: Writes transcript .md + metadata .json
-    Local->>Local: Detect new file (chokidar)
-    Local->>Local: Wait until file size stable (5s)
-    Local->>API: POST /api/meetings/ingest (Bearer secret)
+    U->>Meet: Joins call (Fathom bot joins as attendee)
+    Meet-->>Fathom: Audio + video stream
+    Note over Fathom: Cloud transcription + AI summary
+    Fathom->>API: POST /api/meetings/fathom-webhook (HMAC-SHA256 signed)
+    API->>API: Verify signature
     API->>DB: Insert Meeting row
     API->>Git: pull → write raw/meetings/...md → commit → push
     Git-->>API: commit sha
@@ -501,10 +496,10 @@ sequenceDiagram
 - 60-second `[Undo]` (git revert)
 - `Note` model + audit log via `VaultWrite`
 
-**Phase 4b — Meeting Capture**
-- `cortex-local` watcher daemon on Mac mini (launchd)
-- `/api/meetings/ingest` endpoint with shared-secret auth
-- Meetily output ingestion → vault write to `raw/meetings/YYYY-MM-DD-{title-slug}.md`
+**Phase 4b — Meeting Capture (now Phase 7b)**
+- Fathom cloud webhook ingestion via `POST /api/meetings/fathom-webhook` (HMAC-SHA256 signed)
+- Shared-secret-guarded `POST /api/meetings/ingest` for backfill (used by `scripts/fathom-backfill.ts`)
+- Vault write to `raw/meetings/YYYY-MM-DD-{title-slug}.md` with Summary / Action Items / Transcript sections
 - Telegram notification on success
 - `Meeting` model + audit log via `VaultWrite`
 - `/vault recent` Telegram command for write history
@@ -520,7 +515,7 @@ sequenceDiagram
 - **Cortex writing to `nirvana-wiki/wiki/`** — that is owned by the existing Claude-ingest workflow that processes `raw/` → `wiki/`
 - **Real-time / live meeting transcription** — meetings are captured post-meeting only
 - **Audio file persistence** — neither cortex DB nor the vault stores audio; transcripts only
-- **Multi-source meeting ingestion in v1** — Meetily is the only source; Fathom/Otter/etc. plug into the same ingest endpoint later if needed
+- **Multi-source meeting ingestion** — Fathom is the only source. Adding Otter/Zoom-AI/etc. would require a new webhook controller per source (or extending the discriminated schema)
 - **Cortex-side meeting summaries / action item extraction** — the existing wiki-ingest workflow already does source-summary extraction when promoting `raw/` to `wiki/`
 - **A new query/search surface** — Obsidian, Claude Code in the vault, and the curated `wiki/` views already cover queryability
 
@@ -530,27 +525,27 @@ sequenceDiagram
 
 ```
 ┌──────────────────────────────────────────────────────────┐    ┌─────────────────────────────┐
-│                      Telegram                            │    │   Mac mini (user device)    │
+│                      Telegram                            │    │   Fathom (cloud)            │
 │           (voice messages, text, inline keyboards)       │    │                             │
-└────────────────────────┬─────────────────────────────────┘    │  ┌───────────────────────┐  │
-                         │ Webhook POST (HTTPS)                  │  │  Meetily (local)      │  │
-┌────────────────────────▼─────────────────────────────────┐    │  │  • Captures GMeet     │  │
-│                 NestJS API (Fly.io)                       │    │  │    audio locally      │  │
-│                                                          │    │  │  • Local Whisper /    │  │
-│  ┌───────────────┐  ┌───────────────┐  ┌──────────────┐ │    │  │    Parakeet ASR       │  │
-│  │ Telegram       │  │ LLM            │  │ Calendar     │ │    │  │  • Writes transcript  │  │
-│  │ Module         │  │ Module         │  │ Module       │ │    │  │    .md + .json        │  │
-│  │                │  │                │  │              │ │    │  └───────────┬───────────┘  │
-│  │ • Webhook      │  │ • Claude API   │  │ • GCal API   │ │    │              │              │
-│  │ • Send/edit    │  │ • Whisper API  │  │ • Contacts   │ │    │  ┌───────────▼───────────┐  │
-│  │ • Keyboards    │  │ • Session mgmt │  │ • Events     │ │    │  │  cortex-local         │  │
-│  │ • Voice DL     │  │ • Prompts      │  │              │ │◄───┼──┤  (launchd daemon)     │  │
-│  │ • /note        │  │ • Slug gen     │  │              │ │    │  │  • chokidar watcher   │  │
-│  └───────┬────────┘  └───────┬────────┘  └──────┬───────┘ │    │  │  • POST /api/         │  │
-│          │                   │                   │        │    │  │    meetings/ingest    │  │
-│  ┌───────▼───────────────────▼───────────────────▼──────┐ │    │  │  • Backoff + retry    │  │
-│  │                  Task Module                          │ │    │  └───────────────────────┘  │
-│  │   • CRUD, lifecycle, sub-tasks, comments, search     │ │    └─────────────────────────────┘
+└────────────────────────┬─────────────────────────────────┘    │  • Records meetings         │
+                         │ Webhook POST (HTTPS)                  │  • Cloud transcription      │
+┌────────────────────────▼─────────────────────────────────┐    │  • AI summary + actions     │
+│                 NestJS API (Fly.io)                       │    │                             │
+│                                                          │    └──────────────┬──────────────┘
+│  ┌───────────────┐  ┌───────────────┐  ┌──────────────┐ │                   │
+│  │ Telegram       │  │ LLM            │  │ Calendar     │ │                   │ HMAC-signed
+│  │ Module         │  │ Module         │  │ Module       │ │                   │ webhook
+│  │                │  │                │  │              │ │                   ▼
+│  │ • Webhook      │  │ • Claude API   │  │ • GCal API   │ │   ┌────────────────────────────┐
+│  │ • Send/edit    │  │ • Whisper API  │  │ • Contacts   │ │   │  Meetings Module           │
+│  │ • Keyboards    │  │ • Session mgmt │  │ • Events     │ │◄──┤  • FathomWebhookController │
+│  │ • Voice DL     │  │ • Prompts      │  │              │ │   │  • MeetingsController      │
+│  │ • /note        │  │ • Slug gen     │  │              │ │   │    (backfill ingest)       │
+│  └───────┬────────┘  └───────┬────────┘  └──────┬───────┘ │   └────────────────────────────┘
+│          │                   │                   │        │
+│  ┌───────▼───────────────────▼───────────────────▼──────┐ │
+│  │                  Task Module                          │ │
+│  │   • CRUD, lifecycle, sub-tasks, comments, search     │ │
 │  └──────────────────────┬───────────────────────────────┘ │
 │                         │                                 │
 │  ┌──────────────────────▼───────────────────────────────┐ │    ┌─────────────────────────────┐
@@ -612,12 +607,12 @@ sequenceDiagram
 | Claude Opus 4.6 (decomposition) | **~$8-15** (brain dumps only) |
 | Claude Sonnet 4.6 (structured ops + note slug gen) | **~$2-5** (classification, status, follow-ups, slugs) |
 | OpenAI Whisper (tasks + `/note` voice) | ~$1-2 (5-10 voice msgs/day, 10-min cap) |
-| Meetily (local) | $0 (open-source, runs on Mac mini; uses local Whisper/Parakeet — no API spend on meetings) |
+| Fathom (cloud meeting capture) | varies by Fathom plan — meeting transcription happens entirely on Fathom's infrastructure, no cortex-side LLM cost |
 | GitHub (nirvana-wiki private repo) | $0 (existing) |
 | Cloudflare Pages | $0 |
-| **Total** | **~$11-22/month** |
+| **Total** | **~$11-22/month** (cortex-side; Fathom billed separately) |
 
-Meetings are deliberately routed through local Meetily transcription (free) rather than the OpenAI Whisper API to keep meeting cost flat regardless of meeting volume. Audio also never leaves the Mac, which is the privacy posture we want.
+Meeting transcription happens on Fathom's side — cortex incurs no LLM cost per meeting regardless of meeting volume or length.
 
 **Tiered LLM routing:** Opus 4.6 handles free-flowing → structured work (brain dump decomposition, complex context mapping, incremental enrichment). Sonnet 4.6 handles well-defined operations (single-task classification, status updates, follow-up question generation, comment extraction). This split optimizes cost without sacrificing quality where it matters.
 
@@ -711,7 +706,7 @@ Meeting (Phase 4b)
 ├── ended_at          DateTime
 ├── attendee_emails   String[]
 ├── transcript        Text
-├── source            Enum (meetily) — extensible (fathom, manual) without v1 work
+├── source            Enum (fathom) — extensible to other transcript providers if needed
 ├── vault_path        String — e.g. raw/meetings/2026-04-26-q2-roadmap-review.md
 ├── vault_commit_sha  String
 └── created_at        DateTime
@@ -767,20 +762,13 @@ VaultWrite (Phase 4 — audit log)
 - **Operations:** Create events, add attendees, query free/busy
 - **Mapping:** One Google Calendar ID per workspace
 
-### Meetily (Phase 4b)
-- **Role:** Local audio capture + transcription for Google Meet calls. Runs on the user's Mac mini.
-- **Trust boundary:** Local-only. No cortex credentials cross to Meetily and vice versa.
-- **Output contract** (what `cortex-local` reads):
-  - Transcript file (`.md`) in Meetily's configured output directory
-  - Sidecar metadata (`.json`) with `title`, `attendees`, `started_at`, `ended_at` when Meetily can capture them
-- **Failure mode:** If Meetily is not running when a meeting starts, the meeting is silently lost. Detection is post-hoc (no transcript appears) — see Risks.
-
-### cortex-local watcher (Phase 4b)
-- **Role:** Bridges the Mac mini's local file system to the cortex cloud API.
-- **Auth to cortex:** Shared secret via `Authorization: Bearer ${CORTEX_LOCAL_SHARED_SECRET}`. Single-purpose, single-tenant.
-- **Endpoint:** `POST /api/meetings/ingest` — body matches the Meeting payload contract in B-MEET-2.
-- **Process:** `launchd` user agent. Logs to `~/Library/Logs/cortex-local.log`. Exits and is restarted by launchd on crash.
-- **Heartbeat (deferred to Phase 4b iteration 2):** Daily `POST /api/heartbeat` so cortex can alert if the watcher goes dark for >24h.
+### Fathom (Phase 7b)
+- **Role:** Cloud-based meeting recording, transcription, and summarization.
+- **Auth (incoming):** HMAC-SHA256 signature on each webhook POST. Cortex verifies against `FATHOM_WEBHOOK_SECRET` (the `whsec_` value from Fathom's dashboard, base64-decoded before HMAC).
+- **Auth (outgoing for backfill):** `FATHOM_API_KEY` used by `scripts/fathom-backfill.ts` to list historical recordings.
+- **Endpoint cortex exposes:** `POST /api/meetings/fathom-webhook` — receives `{ title, started_at, ended_at, attendees, transcript, summary?, action_items?, source: "fathom", external_id }`.
+- **Backfill endpoint:** `POST /api/meetings/ingest` — same payload shape, authenticated with shared-secret bearer token. Used only by the backfill script.
+- **Failure mode:** If Fathom can't reach cortex (e.g., Fly outage), Fathom retries per its own retry policy. Cortex idempotency is keyed on `external_id`.
 
 ### GitHub (nirvana-wiki remote) (Phase 4)
 - **Role:** Durable, queryable storage for `raw/` writes. The vault's source of truth.
@@ -821,10 +809,10 @@ VaultWrite (Phase 4 — audit log)
 | Neon free tier storage (0.5 GB) fills | DB writes fail | Archive completed tasks >90 days. Monitor usage. 0.5 GB holds ~50K tasks comfortably. |
 | Upstash free tier (10K cmds/day) hit | Job queue stops | Personal use ~100-500 cmds/day. Well under limit. Fallback: in-process scheduling. |
 | Telegram rate limits | Bot throttled | Personal use: negligible. Telegram allows ~30 msgs/sec to same chat. |
-| **Meetily not running / mic perms missing / app crash** (Phase 4b) | Meeting silently lost | Daily `cortex-local` heartbeat (B-MEET-7); bot alerts if last heartbeat is >26h old. Pre-flight check on Mac mini boot via launchd. Manual fallback: user uploads transcript via a Telegram command. (Calendar-aware "expected meeting had no transcript" alerting deferred — would couple Phase 7b to Phase 5.) |
+| **Fathom outage / webhook delivery failure** (Phase 7b) | Meeting silently lost | Fathom's own retry policy handles transient delivery failures. Backfill script can re-fetch historical recordings from Fathom's API. Idempotency keyed on `external_id` prevents duplicate writes on retry. |
 | **`git push` conflict against wiki-ingest workflow** (Phase 4) | Note/meeting write fails | Cortex writes only to `raw/inbox/` and `raw/meetings/`; the wiki-ingest workflow writes only to `wiki/`. Conflicts essentially impossible by construction. Pull-rebase-retry once on the rare race; surface to user on 2nd failure. |
-| **Whisper cost spike from runaway voice notes** (Phase 4a) | Bill surprise | Hard 10-min cap on `/note` voice (rejected with friendly error). Meeting transcription is local Meetily — no Whisper API cost regardless of meeting length. |
-| **Audio privacy** (Phase 4b) | Sensitive meeting audio leaks | Audio never leaves the Mac (Meetily local). Only transcript travels: Mac → cortex → private GitHub repo → user's vault. No third-party transcription service in the meetings path. |
+| **Whisper cost spike from runaway voice notes** (Phase 4a) | Bill surprise | Hard 10-min cap on `/note` voice (rejected with friendly error). Meeting transcription happens on Fathom — no cortex-side ASR cost. |
+| **Audio privacy** (Phase 7b) | Sensitive meeting audio handled by third party | Audio is recorded and stored by Fathom (cloud). Trust boundary is Fathom's privacy posture. Only transcript text crosses into cortex's vault. |
 | **Deploy key compromise** (Phase 4) | Attacker writes to vault | Key scoped to nirvana-wiki only. Rotate quarterly. Cortex commits attributable via `cortex-bot <bot@cortex.local>` author so anomalies are visible in `git log`. |
 | **Fly.io volume loss** (Phase 4) | Local clone gone, transient downtime | Vault clone is a write cache, not source of truth — recoverable by re-cloning from GitHub on next boot. No data loss possible because every write was already pushed. |
 
@@ -836,7 +824,7 @@ VaultWrite (Phase 4 — audit log)
 4. ~~**Workspace inference for meetings**~~ **Resolved (2026-04-26):** All Meetings default to **Work** workspace in v1. No attendee-domain heuristic. Manual reassignment available via DB / dashboard if needed. Revisit only if signal/noise becomes a real problem.
 5. ~~**Fly volume sizing for vault clone**~~ **Resolved (2026-04-26):** **1 GB** persistent volume on Fly.io (well under the 3GB free allowance, well over the projected <200MB working set). Configured in `fly.toml` at deploy time.
 6. ~~**`/note` while in an active task session**~~ **Resolved (2026-04-26):** **Side-channel.** `/note` routes that single message and returns; the active task follow-up session is untouched. Already enforced in B-NOTE-1.
-7. ~~**Heartbeat alerting cadence**~~ **Resolved (2026-04-26):** **Daily heartbeat** from `cortex-local` to cortex API in v1 (B-MEET-7). Calendar-aware monitoring (alert if expected meeting time passed without transcript) is deferred — it would couple Phase 7b to Phase 5 calendar infrastructure for marginal gain.
+7. ~~**Heartbeat alerting cadence**~~ **Obsolete (2026-05-19):** Cortex-local daemon was dropped; meeting capture is now Fathom-only. Fathom availability is monitored by Fathom; cortex has no liveness signal to track.
 
 ---
 
@@ -848,4 +836,4 @@ VaultWrite (Phase 4 — audit log)
 | **Phase 2** | Reminders (deadline, check-in, deferred), Google Calendar (events, blocking, invites), contact directory, time-based workspace rules | Phase 1 + Google OAuth setup |
 | **Phase 3** | React PWA dashboard on Cloudflare Pages, kanban/list/filter views, offline-first (IndexedDB + service worker) | Phase 1 API endpoints |
 | **Phase 4a** | `/note` Telegram command, vault module (git pull/write/commit/push), Sonnet slug generation, `Note` model, `[Undo]`, `VaultWrite` audit log | Phase 1 + nirvana-wiki GitHub remote + deploy key |
-| **Phase 4b** | `cortex-local` watcher (launchd), `/api/meetings/ingest`, Meetily integration, `Meeting` model, vault write to `raw/meetings/`, Telegram notification, `/vault recent` | Phase 4a (vault module) + Meetily installed on Mac mini |
+| **Phase 4b / 7b** | Fathom cloud webhook (`/api/meetings/fathom-webhook`, HMAC-SHA256), backfill ingest (`/api/meetings/ingest`, shared-secret), `Meeting` model, vault write to `raw/meetings/`, Telegram notification, `/vault recent` | Phase 4a (vault module) + Fathom account with webhook configured |
