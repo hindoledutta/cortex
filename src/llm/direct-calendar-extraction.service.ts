@@ -14,11 +14,14 @@ The user wants to create a calendar event directly. Extract:
 - time: The time in 24-hour format (HH:MM). If "5 PM" → "17:00". If no time is mentioned, return null.
 - duration_minutes: Duration in minutes if explicitly mentioned (e.g., "30 minute call" → 30, "1 hour meeting" → 60). Return null if not specified.
 - person_names: Array of full person names mentioned as attendees/participants. Do NOT include the user themselves.
-- workspace: "work" if this is a professional meeting/call/sync, "personal" if it is a personal appointment/errand. null if truly ambiguous.
+- workspace: Default to "work" for ALL calendar bookings. Only emit "personal" if the user EXPLICITLY says "personal calendar", "private calendar", "on my personal", "on my private", or similar explicit override. Do NOT use content signals (doctor, gym, family, etc.) to switch to personal — those still go to work unless the user explicitly overrides.
 - is_all_day: true only if the user says "all day" or "block the day". false otherwise.
 
-Work signals: calls with colleagues, client meetings, standups, syncs, reviews, 1:1s, planning sessions.
-Personal signals: doctor, dentist, gym, family events, personal errands.
+Examples:
+- "block tomorrow 3pm for dentist" → workspace: "work" (no explicit override)
+- "doctor visit at 5" → workspace: "work" (no explicit override)
+- "book on my personal calendar: gym at 6am" → workspace: "personal" (explicit override)
+- "private calendar, dinner with Mom 8pm" → workspace: "personal" (explicit override)
 
 Return a JSON object matching the provided schema exactly.`;
 

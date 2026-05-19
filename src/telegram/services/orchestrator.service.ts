@@ -1306,19 +1306,14 @@ export class OrchestratorService {
 
       const { extraction } = pending;
 
-      if (extraction.workspace) {
-        const resolvedWorkspace = await this.workspace.findByName(
-          extraction.workspace as WorkspaceName,
-        );
-        if (resolvedWorkspace) {
-          await this.createDirectCalendarEvent(ctx, chatId, extraction, resolvedWorkspace);
-          return;
-        }
+      const targetWorkspaceName = (extraction.workspace ?? 'work') as WorkspaceName;
+      const resolvedWorkspace = await this.workspace.findByName(targetWorkspaceName);
+      if (resolvedWorkspace) {
+        await this.createDirectCalendarEvent(ctx, chatId, extraction, resolvedWorkspace);
+        return;
       }
 
-      // Workspace ambiguous — re-store and prompt for workspace
       this.pendingDirectBookings.set(chatId, pending);
-
       const { text: promptText, extra } = this.formatter.formatWorkspacePromptForCalendar(
         extraction.summary,
         chatId,
@@ -1879,6 +1874,12 @@ export class OrchestratorService {
     }
     if (msg.includes('authentication') || msg.includes('api_key')) {
       return '⚠️ Anthropic API key issue. Please check your configuration.';
+    }
+    if (msg.includes('invalid_grant')) {
+      return '⚠️ Google Calendar access has expired. Re-run `scripts/google-oauth-setup.ts` and update GOOGLE_REFRESH_TOKEN.';
+    }
+    if (msg.includes('insufficient_quota') || msg.includes('exceeded your current quota')) {
+      return '⚠️ OpenAI credits are exhausted. Please top up at platform.openai.com.';
     }
 
     return 'Sorry, something went wrong processing your message. Please try again.';
