@@ -206,13 +206,39 @@ describe('EnrichmentService', () => {
     expect(result.updates.summary.length).toBeGreaterThan(0);
   });
 
-  it('handles unknown field names gracefully', async () => {
+  it('rejects unknown field names at schema validation', async () => {
+    mockCreateMessage.mockResolvedValue({
+      content: JSON.stringify({
+        task_updates: [
+          { task_id: 'task-1', field: 'unknownField', value: 'something' },
+        ],
+        new_sub_tasks: [],
+        summary: 'Attempted update with unknown field',
+      }),
+      usage: { input_tokens: 300, output_tokens: 100 },
+    });
+
+    await expect(
+      service.processFollowUpAnswer(
+        'Some answer',
+        existingTasks,
+        workspaceId,
+      ),
+    ).rejects.toThrow();
+    expect(mockTaskUpdate).not.toHaveBeenCalled();
+  });
+
+  it('applies title correction (replace, not append)', async () => {
     const mockResult: EnrichmentResult = {
       task_updates: [
-        { task_id: 'task-1', field: 'unknownField', value: 'something' },
+        {
+          task_id: 'task-1',
+          field: 'title',
+          value: 'Research moving companies',
+        },
       ],
       new_sub_tasks: [],
-      summary: 'Attempted update with unknown field',
+      summary: 'Corrected title typo',
     };
 
     mockCreateMessage.mockResolvedValue({
@@ -220,16 +246,46 @@ describe('EnrichmentService', () => {
       usage: { input_tokens: 300, output_tokens: 100 },
     });
 
-    // Should not crash
     const result = await service.processFollowUpAnswer(
-      'Some answer',
+      'typo - it should be Research moving companies',
       existingTasks,
       workspaceId,
     );
 
-    // Unknown field is skipped, taskService.update NOT called
-    expect(mockTaskUpdate).not.toHaveBeenCalled();
-    expect(result.appliedUpdates).toBe(0);
+    expect(mockTaskUpdate).toHaveBeenCalledWith(
+      'task-1',
+      workspaceId,
+      { title: 'Research moving companies' },
+    );
+    expect(result.appliedUpdates).toBe(1);
+  });
+
+  it('applies status update', async () => {
+    const mockResult: EnrichmentResult = {
+      task_updates: [
+        { task_id: 'task-2', field: 'status', value: 'done' },
+      ],
+      new_sub_tasks: [],
+      summary: 'Marked equipment task as done',
+    };
+
+    mockCreateMessage.mockResolvedValue({
+      content: JSON.stringify(mockResult),
+      usage: { input_tokens: 300, output_tokens: 100 },
+    });
+
+    const result = await service.processFollowUpAnswer(
+      'I already bought the equipment',
+      existingTasks,
+      workspaceId,
+    );
+
+    expect(mockTaskUpdate).toHaveBeenCalledWith(
+      'task-2',
+      workspaceId,
+      { status: 'done' },
+    );
+    expect(result.appliedUpdates).toBe(1);
   });
 
   it('continues processing after single task update failure', async () => {

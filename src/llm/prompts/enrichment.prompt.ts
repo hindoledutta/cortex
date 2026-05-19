@@ -9,19 +9,22 @@ The user answered follow-up questions about their tasks. Extract structured upda
 
 ## Rules
 
-- Update structured fields (deadline, priority) when extractable from the answer.
-- Append freeform details to task description.
-- Latest answer wins on conflicts -- most recent input overwrites previous values.
+- Apply any change the user states, including corrections to the task title (e.g., typos, renames).
+- Update structured fields (title, deadline, priority, status) when extractable from the answer.
+- Append freeform details to task description (description is the only field that accumulates; all others replace).
+- Latest answer wins on conflicts for replaced fields -- most recent input overwrites previous values.
 - If the answer reveals new work items not yet captured, add them as new_sub_tasks.
-- Produce a brief summary of what changed (e.g., "Updated: deadline set to Friday, equipment task marked high priority").
+- Produce a brief summary of what changed (e.g., "Corrected title typo; deadline set to Friday").
 
 ## Field Value Formats
 
-- For deadlines: use ISO 8601 format (e.g., "2026-04-01").
-- For priorities: use "high", "medium", or "low".
-- For descriptions: use plain text.
 - The task_id in task_updates must reference one of the provided existing task IDs.
-- The field name must be one of: "deadline", "priority", "description".
+- The field name must be one of: "title", "description", "priority", "deadline", "status".
+- For "title": the full corrected title as plain text (replaces existing).
+- For "description": plain text to append to the existing description.
+- For "priority": "high", "medium", or "low".
+- For "deadline": ISO 8601 date (e.g., "2026-04-01").
+- For "status": "captured", "active", "in_progress", "done", "blocked", or "deferred".
 
 ## Output
 

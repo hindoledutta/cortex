@@ -83,7 +83,13 @@ export const EnrichmentResultSchema = z.object({
   task_updates: z.array(
     z.object({
       task_id: z.string(),
-      field: z.string(),
+      field: z.enum([
+        'title',
+        'description',
+        'priority',
+        'deadline',
+        'status',
+      ]),
       value: z.string(),
     }),
   ),

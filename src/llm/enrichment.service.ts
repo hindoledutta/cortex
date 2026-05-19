@@ -4,7 +4,10 @@ import { LlmService } from './llm.service';
 import { TaskService } from '../task/task.service';
 import { EnrichmentResult, EnrichmentResultSchema } from './llm.types';
 import { buildEnrichmentPrompt } from './prompts/enrichment.prompt';
-import { TaskPriority } from '../../prisma/generated/prisma/client/enums';
+import {
+  TaskPriority,
+  TaskStatus,
+} from '../../prisma/generated/prisma/client/enums';
 
 /** Input shape for existing tasks provided to enrichment */
 export interface ExistingTaskInfo {
@@ -143,12 +146,15 @@ export class EnrichmentService {
     existingTask?: ExistingTaskInfo,
   ): Record<string, unknown> | null {
     switch (field) {
+      case 'title':
+        return { title: value };
       case 'deadline':
         return { deadline: value };
       case 'priority':
         return { priority: value as TaskPriority };
+      case 'status':
+        return { status: value as TaskStatus };
       case 'description': {
-        // Append to existing description per user decision
         const current = existingTask?.description ?? '';
         const separator = current ? '\n' : '';
         return { description: current + separator + value };
