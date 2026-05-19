@@ -30,6 +30,7 @@ describe('DecompositionService', () => {
   it('decomposes complex brain dump into parent + sub-tasks', async () => {
     const mockResult: DecompositionResult = {
       needs_decomposition: true,
+      workspace: 'work',
       parent_task: {
         title: 'Office move planning',
         description: 'Plan and execute office relocation',
@@ -67,7 +68,6 @@ describe('DecompositionService', () => {
 
     const result = await service.decompose(
       'We need to move offices by April. Get quotes, pack stuff, update vendors.',
-      'Work',
     );
 
     expect(result.needs_decomposition).toBe(true);
@@ -81,6 +81,7 @@ describe('DecompositionService', () => {
   it('returns single task for simple input', async () => {
     const mockResult: DecompositionResult = {
       needs_decomposition: false,
+      workspace: 'personal',
       parent_task: null,
       sub_tasks: [
         {
@@ -99,7 +100,7 @@ describe('DecompositionService', () => {
       usage: { input_tokens: 200, output_tokens: 80 },
     });
 
-    const result = await service.decompose('Buy milk', 'Personal');
+    const result = await service.decompose('Buy milk');
 
     expect(result.needs_decomposition).toBe(false);
     expect(result.parent_task).toBeNull();
@@ -110,6 +111,7 @@ describe('DecompositionService', () => {
   it('detects gaps and sets follow_up_needed', async () => {
     const mockResult: DecompositionResult = {
       needs_decomposition: true,
+      workspace: 'work',
       parent_task: {
         title: 'Project launch',
         description: 'Launch the new product',
@@ -135,7 +137,6 @@ describe('DecompositionService', () => {
 
     const result = await service.decompose(
       'Launch the new product, send emails, etc',
-      'Work',
     );
 
     expect(result.follow_up_needed).toBe(true);
@@ -154,14 +155,13 @@ describe('DecompositionService', () => {
       usage: { input_tokens: 200, output_tokens: 50 },
     });
 
-    await expect(
-      service.decompose('some input', 'Work'),
-    ).rejects.toThrow();
+    await expect(service.decompose('some input')).rejects.toThrow();
   });
 
-  it('passes decomposition system prompt and workspace context', async () => {
+  it('invokes LLM with decomposition operation and system prompt', async () => {
     const mockResult: DecompositionResult = {
       needs_decomposition: false,
+      workspace: null,
       parent_task: null,
       sub_tasks: [
         { title: 'Task', description: null, priority: 'medium', position: 1 },
@@ -175,11 +175,11 @@ describe('DecompositionService', () => {
       usage: { input_tokens: 200, output_tokens: 80 },
     });
 
-    await service.decompose('do something', 'My Workspace');
+    await service.decompose('do something');
 
     expect(mockCreateMessage).toHaveBeenCalledWith(
       'decomposition',
-      expect.stringContaining('My Workspace'),
+      expect.stringContaining('Cortex'),
       expect.any(Array),
       expect.any(Object),
     );
@@ -188,6 +188,7 @@ describe('DecompositionService', () => {
   it('passes user brain dump as user message', async () => {
     const mockResult: DecompositionResult = {
       needs_decomposition: false,
+      workspace: 'work',
       parent_task: null,
       sub_tasks: [
         { title: 'Task', description: null, priority: 'medium', position: 1 },
@@ -201,7 +202,7 @@ describe('DecompositionService', () => {
       usage: { input_tokens: 200, output_tokens: 80 },
     });
 
-    await service.decompose('my brain dump text', 'Work');
+    await service.decompose('my brain dump text');
 
     const messages = mockCreateMessage.mock.calls[0][2];
     expect(messages).toEqual([
