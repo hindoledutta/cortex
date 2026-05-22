@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
-import { Contact } from '@generated/prisma/client/client';
+import { Contact } from '../../../prisma/generated/prisma/client/client';
 import { ContactResolutionResult } from '../calendar.types';
 
 /**
